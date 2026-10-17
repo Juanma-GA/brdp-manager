@@ -1,0 +1,2316 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:dc="http://www.purl.org/dc/elements/1.1/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xlink="http://www.w3.org/1999/xlink" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd">
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="LHTSTD" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="0A" infoCode="022" infoCodeVariant="A" itemLocationCode="D" />
+        <language languageIsoCode="sx" countryIsoCode="US" />
+        <issueInfo issueNumber="001" inWork="00" />
+      </dmIdent>
+      <dmAddressItems>
+        <issueDate year="2024" month="12" day="09" />
+        <dmTitle>
+          <techName>Project LHTSTD</techName>
+          <infoName>Business rules exchange data module</infoName>
+        </dmTitle>
+      </dmAddressItems>
+    </dmAddress>
+    <dmStatus issueType="new">
+      <security securityClassification="01"></security>
+      <dataRestrictions>
+        <restrictionInstructions>
+          <dataDistribution>For Lufthansa Technik Ag testing and demo purposes only.</dataDistribution>
+        </restrictionInstructions>
+        <restrictionInfo>
+          <copyright>
+            <copyrightPara>
+							<emphasis>Copyright (C) 2024</emphasis> by: <randomList><listItem><para>Lufthansa Technik AG.</para></listItem></randomList>
+						</copyrightPara>
+            <copyrightPara>
+							<emphasis>Limitations of Liability:</emphasis>
+						</copyrightPara>
+            <copyrightPara>
+							<randomList><listItem><para>This document and its content are copyright protected and either owned by or licensed to Lufthansa Technik AG. All rights reserved.</para></listItem><listItem><para>This document and the information contained herein shall be kept strictly confidential and shall not be used, disclosed to others or reproduced for any use other than the one they were provided for without the express written consent of Lufthansa Technik AG.</para></listItem></randomList>
+						</copyrightPara>
+          </copyright>
+        </restrictionInfo>
+      </dataRestrictions>
+      <responsiblePartnerCompany enterpriseCode="C1008">
+        
+      <enterpriseName>LUFTHANSA TECHNIK AG</enterpriseName></responsiblePartnerCompany>
+      <originator enterpriseCode="C1008">
+        
+      <enterpriseName>LUFTHANSA TECHNIK AG</enterpriseName></originator>
+      <applic>
+        <displayText>
+          <simplePara>ALL</simplePara>
+        </displayText>
+      </applic>
+      <brexDmRef>
+        <dmRef>
+          <dmRefIdent>
+            <dmCode modelIdentCode="ATABREX" systemDiffCode="F" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="0000" disassyCode="01" disassyCodeVariant="B" infoCode="022" infoCodeVariant="A" itemLocationCode="D" />
+          </dmRefIdent>
+        </dmRef>
+      </brexDmRef>
+      <qualityAssurance>
+        
+      <firstVerification verificationType="tabtop" /></qualityAssurance>
+      <reasonForUpdate id="rfu-001" updateReasonType="urt02" updateHighlight="1">
+        <simplePara>Data changed</simplePara>
+      </reasonForUpdate>
+    </dmStatus>
+  </identAndStatusSection>
+  <content>
+    <brex>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ddn.xsd">
+        <structureObjectRuleGroup>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//ddnCode/@senderIdent</objectPath>
+            <objectUse>BRDP-S1-00002. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="C1008">LUFTHANSA TECHNIK AG</objectValue>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//ddnCode/@receiverIdent</objectPath>
+            <objectUse>BRDP-S1-00002. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="C1008">LUFTHANSA TECHNIK AG</objectValue>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <contextRules>
+        <structureObjectRuleGroup>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//@xsi:noNamespaceSchemaLocation</objectPath>
+                  <objectUse>BRDP-S1-00006. Decision by Company. </objectUse>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/appliccrossreftable.xsd">Applicability schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd">BREX schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comrep.xsd">CIR schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd">Condition schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ddn.xsd">DDN schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd">Descriptive schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd">DML schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd">Fault schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd">IPD schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/pm.xsd">PM schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd">Product schema flat 4.2</objectValue>
+                  <objectValue valueForm="single" valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">Procedural schema flat 4.2</objectValue>
+               </structureObjectRule>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="0">//dmCode[@infoCode="00S"]</objectPath>
+                  <objectUse>BRDP-S1-00037. Decision by Company. </objectUse>
+               </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0"> //dmCode/@infoCode="000" or //dmCode/@infoCode="002" or //dmCode/@infoCode="010" or //dmCode/@infoCode="011" or //dmCode/@infoCode="014" or //dmCode/@infoCode="015" or //dmCode/@infoCode="016" or //dmCode/@infoCode="017" or //dmCode/@infoCode="019" or //dmCode/@infoCode="024" or //dmCode/@infoCode="028" or //dmCode/@infoCode="02A" or //dmCode/@infoCode="02B" or //dmCode/@infoCode="030" or //dmCode/@infoCode="031" or //dmCode/@infoCode="033" or //dmCode/@infoCode="034" or //dmCode/@infoCode="040" or //dmCode/@infoCode="043" or //dmCode/@infoCode="045" or //dmCode/@infoCode="046" or //dmCode/@infoCode="059" or //dmCode/@infoCode="060" or //dmCode/@infoCode="061" or //dmCode/@infoCode="062" or //dmCode/@infoCode="063" or //dmCode/@infoCode="064" or //dmCode/@infoCode="065" or //dmCode/@infoCode="066" or //dmCode/@infoCode="067" or //dmCode/@infoCode="070" or //dmCode/@infoCode="071" or //dmCode/@infoCode="072" or //dmCode/@infoCode="073" or //dmCode/@infoCode="074" or //dmCode/@infoCode="075" or //dmCode/@infoCode="076" or //dmCode/@infoCode="077" or //dmCode/@infoCode="078" or //dmCode/@infoCode="080" or //dmCode/@infoCode="081" or //dmCode/@infoCode="082" or //dmCode/@infoCode="090" or //dmCode/@infoCode="096" or //dmCode/@infoCode="00M" or //dmCode/@infoCode="00P" or //dmCode/@infoCode="00Q" or //dmCode/@infoCode="00Y" or //dmCode/@infoCode="0A2" or //dmCode/@infoCode="0A3" or //dmCode/@infoCode="0B0" or //dmCode/@infoCode="0B1" or //dmCode/@infoCode="0B2" or //dmCode/@infoCode="0B3" or //dmCode/@infoCode="0B4" or //dmCode/@infoCode="0B5" or //dmCode/@infoCode="100" or //dmCode/@infoCode="101" or //dmCode/@infoCode="102" or //dmCode/@infoCode="103" or //dmCode/@infoCode="104" or //dmCode/@infoCode="105" or //dmCode/@infoCode="106" or //dmCode/@infoCode="107" or //dmCode/@infoCode="110" or //dmCode/@infoCode="115" or //dmCode/@infoCode="120" or //dmCode/@infoCode="122" or //dmCode/@infoCode="123" or //dmCode/@infoCode="126" or //dmCode/@infoCode="130" or //dmCode/@infoCode="132" or //dmCode/@infoCode="133" or //dmCode/@infoCode="134" or //dmCode/@infoCode="136" or //dmCode/@infoCode="138" or //dmCode/@infoCode="139" or //dmCode/@infoCode="140" or //dmCode/@infoCode="142" or //dmCode/@infoCode="143" or //dmCode/@infoCode="144" or //dmCode/@infoCode="150" or //dmCode/@infoCode="157" or //dmCode/@infoCode="160" or //dmCode/@infoCode="169" or //dmCode/@infoCode="170" or //dmCode/@infoCode="171" or //dmCode/@infoCode="172" or //dmCode/@infoCode="173" or //dmCode/@infoCode="176" or //dmCode/@infoCode="177" or //dmCode/@infoCode="178" or //dmCode/@infoCode="180" or //dmCode/@infoCode="181" or //dmCode/@infoCode="210" or //dmCode/@infoCode="211" or //dmCode/@infoCode="212" or //dmCode/@infoCode="213" or //dmCode/@infoCode="214" or //dmCode/@infoCode="215" or //dmCode/@infoCode="216" or //dmCode/@infoCode="217" or //dmCode/@infoCode="218" or //dmCode/@infoCode="219" or //dmCode/@infoCode="220" or //dmCode/@infoCode="221" or //dmCode/@infoCode="222" or //dmCode/@infoCode="223" or //dmCode/@infoCode="224" or //dmCode/@infoCode="225" or //dmCode/@infoCode="226" or //dmCode/@infoCode="227" or //dmCode/@infoCode="228" or //dmCode/@infoCode="229" or //dmCode/@infoCode="230" or //dmCode/@infoCode="231" or //dmCode/@infoCode="232" or //dmCode/@infoCode="233" or //dmCode/@infoCode="234" or //dmCode/@infoCode="236" or //dmCode/@infoCode="237" or //dmCode/@infoCode="241" or //dmCode/@infoCode="242" or //dmCode/@infoCode="243" or //dmCode/@infoCode="251" or //dmCode/@infoCode="252" or //dmCode/@infoCode="253" or //dmCode/@infoCode="254" or //dmCode/@infoCode="255" or //dmCode/@infoCode="256" or //dmCode/@infoCode="257" or //dmCode/@infoCode="258" or //dmCode/@infoCode="259" or //dmCode/@infoCode="261" or //dmCode/@infoCode="262" or //dmCode/@infoCode="263" or //dmCode/@infoCode="264" or //dmCode/@infoCode="288" or //dmCode/@infoCode="289" or //dmCode/@infoCode="292" or //dmCode/@infoCode="293" or //dmCode/@infoCode="294" or //dmCode/@infoCode="295" or //dmCode/@infoCode="296" or //dmCode/@infoCode="297" or //dmCode/@infoCode="298" or //dmCode/@infoCode="299" or //dmCode/@infoCode="301" or //dmCode/@infoCode="302" or //dmCode/@infoCode="303" or //dmCode/@infoCode="304" or //dmCode/@infoCode="305" or //dmCode/@infoCode="306" or //dmCode/@infoCode="307" or //dmCode/@infoCode="311" or //dmCode/@infoCode="312" or //dmCode/@infoCode="315" or //dmCode/@infoCode="321" or //dmCode/@infoCode="322" or //dmCode/@infoCode="331" or //dmCode/@infoCode="332" or //dmCode/@infoCode="333" or //dmCode/@infoCode="334" or //dmCode/@infoCode="335" or //dmCode/@infoCode="343" or //dmCode/@infoCode="344" or //dmCode/@infoCode="345" or //dmCode/@infoCode="346" or //dmCode/@infoCode="347" or //dmCode/@infoCode="348" or //dmCode/@infoCode="349" or //dmCode/@infoCode="351" or //dmCode/@infoCode="352" or //dmCode/@infoCode="353" or //dmCode/@infoCode="354" or //dmCode/@infoCode="355" or //dmCode/@infoCode="356" or //dmCode/@infoCode="357" or //dmCode/@infoCode="358" or //dmCode/@infoCode="359" or //dmCode/@infoCode="371" or //dmCode/@infoCode="372" or //dmCode/@infoCode="373" or //dmCode/@infoCode="374" or //dmCode/@infoCode="376" or //dmCode/@infoCode="377" or //dmCode/@infoCode="378" or //dmCode/@infoCode="379" or //dmCode/@infoCode="380" or //dmCode/@infoCode="381" or //dmCode/@infoCode="382" or //dmCode/@infoCode="383" or //dmCode/@infoCode="384" or //dmCode/@infoCode="385" or //dmCode/@infoCode="386" or //dmCode/@infoCode="387" or //dmCode/@infoCode="388" or //dmCode/@infoCode="389" or //dmCode/@infoCode="401" or //dmCode/@infoCode="402" or //dmCode/@infoCode="403" or //dmCode/@infoCode="404" or //dmCode/@infoCode="405" or //dmCode/@infoCode="406" or //dmCode/@infoCode="407" or //dmCode/@infoCode="411" or //dmCode/@infoCode="412" or //dmCode/@infoCode="413" or //dmCode/@infoCode="414" or //dmCode/@infoCode="415" or //dmCode/@infoCode="420" or //dmCode/@infoCode="429" or //dmCode/@infoCode="443" or //dmCode/@infoCode="521" or //dmCode/@infoCode="522" or //dmCode/@infoCode="523" or //dmCode/@infoCode="524" or //dmCode/@infoCode="531" or //dmCode/@infoCode="561" or //dmCode/@infoCode="562" or //dmCode/@infoCode="563" or //dmCode/@infoCode="611" or //dmCode/@infoCode="612" or //dmCode/@infoCode="613" or //dmCode/@infoCode="614" or //dmCode/@infoCode="615" or //dmCode/@infoCode="621" or //dmCode/@infoCode="622" or //dmCode/@infoCode="623" or //dmCode/@infoCode="624" or //dmCode/@infoCode="625" or //dmCode/@infoCode="626" or //dmCode/@infoCode="627" or //dmCode/@infoCode="631" or //dmCode/@infoCode="632" or //dmCode/@infoCode="633" or //dmCode/@infoCode="634" or //dmCode/@infoCode="635" or //dmCode/@infoCode="636" or //dmCode/@infoCode="638" or //dmCode/@infoCode="639" or //dmCode/@infoCode="641" or //dmCode/@infoCode="642" or //dmCode/@infoCode="643" or //dmCode/@infoCode="644" or //dmCode/@infoCode="645" or //dmCode/@infoCode="646" or //dmCode/@infoCode="647" or //dmCode/@infoCode="648" or //dmCode/@infoCode="649" or //dmCode/@infoCode="651" or //dmCode/@infoCode="652" or //dmCode/@infoCode="653" or //dmCode/@infoCode="654" or //dmCode/@infoCode="655" or //dmCode/@infoCode="656" or //dmCode/@infoCode="657" or //dmCode/@infoCode="658" or //dmCode/@infoCode="659" or //dmCode/@infoCode="662" or //dmCode/@infoCode="663" or //dmCode/@infoCode="664" or //dmCode/@infoCode="666" or //dmCode/@infoCode="667" or //dmCode/@infoCode="668" or //dmCode/@infoCode="669" or //dmCode/@infoCode="670" or //dmCode/@infoCode="671" or //dmCode/@infoCode="681" or //dmCode/@infoCode="682" or //dmCode/@infoCode="683" or //dmCode/@infoCode="684" or //dmCode/@infoCode="685" or //dmCode/@infoCode="686" or //dmCode/@infoCode="689" or //dmCode/@infoCode="711" or //dmCode/@infoCode="712" or //dmCode/@infoCode="713" or //dmCode/@infoCode="714" or //dmCode/@infoCode="721" or //dmCode/@infoCode="722" or //dmCode/@infoCode="723" or //dmCode/@infoCode="724" or //dmCode/@infoCode="761" or //dmCode/@infoCode="762" or //dmCode/@infoCode="801" or //dmCode/@infoCode="802" or //dmCode/@infoCode="803" or //dmCode/@infoCode="804" or //dmCode/@infoCode="805" or //dmCode/@infoCode="806" or //dmCode/@infoCode="807" or //dmCode/@infoCode="811" or //dmCode/@infoCode="812" or //dmCode/@infoCode="832" or //dmCode/@infoCode="842" or //dmCode/@infoCode="860" or //dmCode/@infoCode="901" or //dmCode/@infoCode="902" or //dmCode/@infoCode="903" or //dmCode/@infoCode="904" or //dmCode/@infoCode="905" or //dmCode/@infoCode="906" or //dmCode/@infoCode="907" or //dmCode/@infoCode="910" or //dmCode/@infoCode="911" or //dmCode/@infoCode="913" or //dmCode/@infoCode="914" or //dmCode/@infoCode="915" or //dmCode/@infoCode="916" or //dmCode/@infoCode="920" or //dmCode/@infoCode="921" or //dmCode/@infoCode="922" or //dmCode/@infoCode="923" or //dmCode/@infoCode="933" or //dmCode/@infoCode="934" or //dmCode/@infoCode="940" or //dmCode/@infoCode="950" or //dmCode/@infoCode="961" or //dmCode/@infoCode="970" or //dmCode/@infoCode="992" or //dmCode/@infoCode="998" or //dmCode/@infoCode="C00" or //dmCode/@infoCode="C01" or //dmCode/@infoCode="C02" or //dmCode/@infoCode="C03" or //dmCode/@infoCode="C04" or //dmCode/@infoCode="C05" or //dmCode/@infoCode="C06" or //dmCode/@infoCode="C07" or //dmCode/@infoCode="C13" or //dmCode/@infoCode="C14" or //dmCode/@infoCode="C15" or //dmCode/@infoCode="C20" or //dmCode/@infoCode="C21" or //dmCode/@infoCode="C22" or //dmCode/@infoCode="C23" or //dmCode/@infoCode="C25" or //dmCode/@infoCode="C26" or //dmCode/@infoCode="C27" or //dmCode/@infoCode="C30" or //dmCode/@infoCode="C31" or //dmCode/@infoCode="C32" or //dmCode/@infoCode="C33" or //dmCode/@infoCode="C34" or //dmCode/@infoCode="C35" or //dmCode/@infoCode="C36" or //dmCode/@infoCode="C50" or //dmCode/@infoCode="C51" or //dmCode/@infoCode="C52" or //dmCode/@infoCode="C53" or //dmCode/@infoCode="C60" or //dmCode/@infoCode="C61" or //dmCode/@infoCode="C62" or //dmCode/@infoCode="C70" or //dmCode/@infoCode="C72" or //dmCode/@infoCode="C73" or //dmCode/@infoCode="C74" or //dmCode/@infoCode="C75" or //dmCode/@infoCode="C90" or //dmCode/@infoCode="C91" or //dmCode/@infoCode="C92" or //dmCode/@infoCode="C95" or //dmCode/@infoCode="C96"</objectPath>
+            <objectUse>BRDP-S1-00052. Decision by Company. </objectUse>
+          </structureObjectRule>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//dmCode[@infoCode="001" or @infoCode="003" or  @infoCode="005" or  @infoCode="006" or  @infoCode="007" or  @infoCode="008" or  @infoCode="009" or  @infoCode="012" or  @infoCode="013" or  @infoCode="018" or @infoCode="020" or @infoCode="021" or @infoCode="022" or @infoCode="023" or @infoCode="041" or @infoCode="042" or @infoCode="044" or @infoCode="050" or @infoCode="051" or @infoCode="052" or @infoCode="053" or @infoCode="054" or @infoCode="055" or @infoCode="056" or @infoCode="057" or @infoCode="058" or @infoCode="00C" or @infoCode="00D" or @infoCode="00G" or @infoCode="00K" or @infoCode="00L" or @infoCode="00N" or @infoCode="00T" or @infoCode="00U" or @infoCode="00W" or @infoCode="00Z" or @infoCode="0A4" or @infoCode="0A5" or @infoCode="200" or @infoCode="201" or @infoCode="202" or @infoCode="203" or @infoCode="204" or @infoCode="205" or @infoCode="206" or @infoCode="207" or @infoCode="240" or @infoCode="250" or @infoCode="260" or @infoCode="270" or @infoCode="271" or @infoCode="272" or @infoCode="273" or @infoCode="274" or @infoCode="275" or @infoCode="276" or @infoCode="277" or @infoCode="280" or @infoCode="281" or @infoCode="282" or @infoCode="283" or @infoCode="284" or @infoCode="285" or @infoCode="286" or @infoCode="290" or @infoCode="300" or @infoCode="310" or @infoCode="320" or @infoCode="330" or @infoCode="340" or @infoCode="341" or @infoCode="342" or @infoCode="350" or @infoCode="360" or @infoCode="361" or @infoCode="362" or @infoCode="363" or @infoCode="364" or @infoCode="365" or @infoCode="366" or @infoCode="367" or @infoCode="368" or @infoCode="369" or @infoCode="370" or @infoCode="390" or @infoCode="398" or @infoCode="400" or @infoCode="410" or @infoCode="430" or @infoCode="440" or @infoCode="441" or @infoCode="442" or @infoCode="500" or @infoCode="501" or @infoCode="502" or @infoCode="503" or @infoCode="504" or @infoCode="505" or @infoCode="506" or @infoCode="507" or @infoCode="510" or @infoCode="520" or @infoCode="530" or @infoCode="550" or @infoCode="551" or @infoCode="552" or @infoCode="553" or @infoCode="560" or @infoCode="600" or @infoCode="601" or @infoCode="602" or @infoCode="603" or @infoCode="604" or @infoCode="605" or @infoCode="606" or @infoCode="607" or @infoCode="610" or @infoCode="620" or @infoCode="630" or @infoCode="640" or @infoCode="650" or @infoCode="660" or @infoCode="661" or @infoCode="690" or @infoCode="691" or @infoCode="692" or @infoCode="693" or @infoCode="700" or @infoCode="701" or @infoCode="702" or @infoCode="703" or @infoCode="704" or @infoCode="705" or @infoCode="706" or @infoCode="707" or @infoCode="710" or @infoCode="720" or @infoCode="730" or @infoCode="750" or @infoCode="752" or @infoCode="760" or @infoCode="800" or @infoCode="810" or @infoCode="820" or @infoCode="830" or @infoCode="840" or @infoCode="850" or @infoCode="870" or @infoCode="880" or @infoCode="890" or @infoCode="900" or @infoCode="930" or @infoCode="941" or @infoCode="942" or @infoCode="997"]</objectPath>
+                  <objectUse>BRDP-S1-00052. Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP. </objectUse>
+               </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//@issueType[.='revised']</objectPath>
+            <objectUse>BRDP-S1-00053. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//copyright/copyrightPara/emphasis[1]</objectPath>
+            <objectUse>BRDP-S1-00065. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="Copyright (C) 2024">Lufthansa Technik copyright emphasis</objectValue>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//responsiblePartnerCompany/@enterpriseCode</objectPath>
+            <objectUse>BRDP-S1-00070. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="C1008">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//responsiblePartnerCompany/enterpriseName</objectPath>
+            <objectUse>BRDP-S1-00070. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="LUFTHANSA TECHNIK AG">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//originator/@enterpriseCode</objectPath>
+            <objectUse>BRDP-S1-00071. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="C1008">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//originator/enterpriseName</objectPath>
+            <objectUse>BRDP-S1-00071. Decision by Company. </objectUse>
+            <objectValue valueForm="single" valueAllowed="LUFTHANSA TECHNIK AG">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//title/internalRef</objectPath>
+            <objectUse>BRDP-S1-00095. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//caption</objectPath>
+            <objectUse>BRDP-S1-00117. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::*) &gt;= 5]/title</objectPath>
+            <objectUse>BRDP-S1-00120. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//levelledPara[count(ancestor::*) &gt;= 5]/title</objectPath>
+            <objectUse>BRDP-S1-00120. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//table/graphic</objectPath>
+            <objectUse>BRDP-S1-00122. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//entry/*[@applicRefId]</objectPath>
+            <objectUse>BRDP-S1-00123. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//parameter</objectPath>
+            <objectUse>BRDP-S1-00133. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//supportEquipDescr[not(@id)]</objectPath>
+            <objectUse>BRDP-S1-00150. Decision by TDWG. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//@materialUsage</objectPath>
+            <objectUse>BRDP-S1-00151. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//inlineSignificantData</objectPath>
+            <objectUse>BRDP-S1-00160. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//footnote</objectPath>
+            <objectUse>BRDP-S1-00172. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//dataRestrictions[@authorityName] | //dataRestrictions[@authorityDocument]</objectPath>
+            <objectUse>BRDP-S1-00176. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//commonInfo[not(ancestor::procedure)]</objectPath>
+            <objectUse>BRDP-S1-00177. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//levelledPara[not(node())] </objectPath>
+            <objectUse>BRDP-S1-00181. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//proceduralStepAlts | //figureAlts | //multimediaAlts</objectPath>
+            <objectUse>BRDP-S1-00185. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//optionalPart/catalogSeqNumberRef</objectPath>
+            <objectUse>BRDP-S1-00223. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//preferredSparePart/catalogSeqNumberRef</objectPath>
+            <objectUse>BRDP-S1-00224. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//alteredFromPart/catalogSeqNumberRef</objectPath>
+            <objectUse>BRDP-S1-00225. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//dmStatus/applicRef or //pmStatus/applicRef</objectPath>
+            <objectUse>BRDP-S1-00316. Decision by S1000D. </objectUse>
+          </structureObjectRule>
+		<structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//@modelIdentCode</objectPath>
+                  <objectUse>BRDP-S1-00332. Decision by Company. </objectUse>
+                  <objectValue valueForm="single" valueAllowed="LHTCMP">Company</objectValue>
+                  <objectValue valueForm="single" valueAllowed="LHTSTD">Company</objectValue>
+			 <objectValue valueForm="single" valueAllowed="ATABREX">Used to allowed ATA CMP brex</objectValue>
+                  <objectValue valueForm="single" valueAllowed="S1000D">Used to allowed S1000D brex</objectValue>
+            </structureObjectRule>
+          <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//@systemDiffCode</objectPath>
+                  <objectUse>BRDP-S1-00334. Decision by Company. </objectUse>
+                  <objectValue valueForm="single" valueAllowed="A">SDC to be used if different LRUs are in identical SNS. No UOC is used. </objectValue>
+                  <objectValue valueForm="single" valueAllowed="F">Decision: Only the S1000D and ATA BREX Data modules will allow systemDiffCode of F</objectValue>
+               </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//@assyCode[matches(., '^\d{2}$')]</objectPath>
+            <objectUse>BRDP-S1-00338. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//@disassyCodeVariant[string-length(.)=2]</objectPath>
+            <objectUse>BRDP-S1-00342. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//identExtension</objectPath>
+            <objectUse>BRDP-S1-00373. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//commonInfoDescrParaAlts | //levelledParaAlts | //isolatedFaultAlts | //detectedFaultAlts | //observedFaultAlts | //correlatedFaultAlts | //warningMalfunctionAlts | //assocWarningMalfunctionAlts | //bitMessageAlts | //isolationStepAlts | //isolationProcedureEndAlts | //taskDefinitionAlts | //wireAlts | //harnessAlts | //electricalEquipAlts | //dialogAlts | //dmNodeAlts | //dmSeqAlts | //messageAlts</objectPath>
+            <objectUse>BRDP-S1-00382. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//logo</objectPath>
+            <objectUse>BRDP-S1-00489. Decision by . </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//randomList//randomList</objectPath>
+            <objectUse>BRDP-S1-00507. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//dmStatus/derivativeClassification</objectPath>
+            <objectUse>BRDP-S1-00558. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//@timeLimitCategoryValue</objectPath>
+            <objectUse>BRDP-S1-00563. Decision by . </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//classificationActionGroup</objectPath>
+            <objectUse>BRDP-S1-00568. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd">
+        <structureObjectRuleGroup>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//dmodule</objectPath>
+            <objectUse>BRDP-S1-00006. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd">
+        <structureObjectRuleGroup>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//dmodule</objectPath>
+            <objectUse>BRDP-S1-00006. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd">
+        <structureObjectRuleGroup>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//dmodule</objectPath>
+            <objectUse>BRDP-S1-00006. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">
+        <structureObjectRuleGroup>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//supplyDescr[not(@id)]</objectPath>
+            <objectUse>BRDP-S1-00155. Decision by TDWG. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//spareDescr[not(@id)]</objectPath>
+            <objectUse>BRDP-S1-00156. Decision by TDWG. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep)&gt;5]</objectPath>
+            <objectUse>BRDP-S1-00186. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//proceduralStep[count(child::proceduralStep) &lt; 2]</objectPath>
+            <objectUse>BRDP-S1-00187. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd">
+        <structureObjectRuleGroup>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="1">//itemSeqNumber/partSegment</objectPath>
+            <objectUse>BRDP-S1-00219. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//itemSeqNumber/applicabilitySegment/usableOnCodeAssy</objectPath>
+            <objectUse>BRDP-S1-00230. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//itemSeqNumber/genericPartDataGroup</objectPath>
+            <objectUse>BRDP-S1-00237. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+         <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/pm.xsd">
+            <structureObjectRuleGroup>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//pmCode/@pmIssuer</objectPath>
+                  <objectUse>BRDP-S1-00365. Decision by Company. </objectUse>
+                  <objectValue valueForm="single" valueAllowed="C1008">CAGE code for LUFTHANSA TECHNIK AG</objectValue>
+               </structureObjectRule>
+            </structureObjectRuleGroup>
+         </contextRules>
+      <contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comrep.xsd">
+        <structureObjectRuleGroup>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//commonRepository/partRepository</objectPath>
+                  <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+               </structureObjectRule>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//commonRepository/toolRepository</objectPath>
+                  <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+               </structureObjectRule>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//commonRepository/supplyRepository</objectPath>
+                  <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+               </structureObjectRule>                              		    <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//commonRepository/warningRepository</objectPath>
+                  <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+               </structureObjectRule>
+               <structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//commonRepository/cautionRepository</objectPath>
+                  <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+               </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="2">//commonRepository/enterpriseRepository</objectPath>
+            <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//commonRepository/supplyRqmtRepository</objectPath>
+            <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+          </structureObjectRule>
+          <structureObjectRule>
+            <objectPath allowedObjectFlag="0">//commonRepository/applicRepository</objectPath>
+            <objectUse>BRDP-S1-00377. Decision by Company. </objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+      <nonContextRules>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00001. Decide whether and when to use the alpha characters "I" and "O". </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00003. Decide which issue or issues of S1000D to be used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00004. Decide which information sets, given in S1000D and/or project specific, to be used. </simplePara>
+          <simplePara>Decision made by Project. Infosets required
+- Common Information and Data
+- Description and Operation
+- Fault Isolation (later stage)
+- Illustrated Parts Data
+- Maintenance Procedures</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00005. Decide which publications to be produced. </simplePara>
+          <simplePara>Decision made by Project. PDF export optional</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00007. Decide whether and how to use each optional element and attribute in its structural context. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00008. Decide on the possible deliverables, such as: S1000D objects (eg, data modules, publication modules, illustration sheets and multimedia objects, data management lists) using file based transfer. Page-oriented publications and/or interactive electronic technical publications. </simplePara>
+          <simplePara>Decision made by Project. PDF export optional</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00009. Decide on the frequency of data exchanges. </simplePara>
+          <simplePara>Decision made by Project. Exchange on demand.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00010. Decide whether to use a zoning and access identification system. </simplePara>
+          <simplePara>Decision made by Project. Zoning rules shall not be applied for CMPs</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00011. Decide which method to use for zoning and identifying access points. </simplePara>
+          <simplePara>Decision made by Project. Zoning rules shall not be applied for CMPs</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00013. Determine how the security classifications will be used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00014. Determine if the policies that apply to security marking, instructions, etc, and how those markings are required to be applied within the given project. </simplePara>
+          <simplePara>Decision made by Project. Caveats shall not be applied.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00015. Decide on the retention of security classifications. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00016. Decide on how the security classifications will be marked and/or indicated. </simplePara>
+          <simplePara>Decision made by Project. Shall not be displayed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00017. Decide on the rules for QA of data modules and deliverables. </simplePara>
+          <simplePara>Decision made by Project. CMP: For draft deliveries, "Unverified" is acceptable. For issued DMs, only first verification will be used, and the verification type will be "Tabletop", "On-Object", or "Tabletop and On- Object".</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00018. Decide on the rules for first and second verification. For example, such a rule might be that all data modules that have a safety related procedure must have first verification carried out "On object". </simplePara>
+          <simplePara>Decision made by Project. CMP: For draft deliveries, "Unverified" is acceptable. For issued DMs, only first verification will be used, and the verification type will be "Tabletop", "On-Object", or "Tabletop and On- Object".</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00019. Decide on the review cycle processes and procedures. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00020. Decide which language to use for producing data modules. </simplePara>
+          <simplePara>Decision made by Project. All data modules must be written in U.S. English.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00021. Decide whether to use ASD-STE100® when producing data modules in English. </simplePara>
+          <simplePara>Decision made by Project. All Procedural data modules must use the writing rules and vocabulary in ASD Simplified Technical English (ASD-STE100).   Use of STE is optional for other data module types</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00022. Decide which standard dictionary to use for producing data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00023. Decide whether to use a terminology database or a glossary. If used, agree on its content and management. </simplePara>
+          <simplePara>Decision made by Project. The ATA Common Support Data Dictionary shall be used for Civil Aviation maintenance terminology</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00024. Decide whether to use a standard list of abbreviations. If used, agree on its content and management. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00025. Decide what unit of measurement to use for primary and secondary units. </simplePara>
+          <simplePara>Decision made by Project. Measurements shall be provided in both S.I. (metric) and Imperial/U.S. units. The first value shall be in the units used in the original design. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00026. Decide on which method to be used to emphasize text. </simplePara>
+          <simplePara>Decision made by Project. Bold text only shall be used to emphasize text. Overline text
+may be used only for marking vectors.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00027. Decide which parts of the documentation (data modules and publications including IETP) need to be printable. </simplePara>
+          <simplePara>Decision made by Project. All content DMC need to be convertible to PDF: PMC, descript, proced, fault, IPD</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00028. Decide if schematics derived from engineering drawings include the original drawing number and revision status within the illustration reproduction area. </simplePara>
+          <simplePara>Decision made by Project. shall be included</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00029. Decide whether to use color in the final deliverable. </simplePara>
+          <simplePara>Decision made by Project. The use of color is permitted in accordance with the ATA iSpec 2200 3-1-12.4 Graphic Style Standards.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00030. Decide whether to produce general warnings, cautions and notes in separate descriptive data modules. </simplePara>
+          <simplePara>Decision made by Project. No DM with general warnings and cautions shall be produced.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00031. Decide whether to use warning and/or caution collections, internal or external. </simplePara>
+          <simplePara>Decision made by Project. A Warnings and Cautions Common Information Repositories (CIRs) shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00036. Decide whether to present the issue number with or without the inwork number on the title page. </simplePara>
+          <simplePara>Decision made by Project. The issue number shall be presented on the title page.  The inwork number may only be presented in unreleased documents.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00037. Decide whether the use of LOEP or LOEDM. </simplePara>
+          <simplePara>Decision made by Project. LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00038. Decide whether to present the issue date or the issue number (with or without inwork number) for the LOEP entries. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00039. Decide whether to present the applicability information for the LOEP entries. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00040. Decide whether to present the issue date or the issue number (with or without inwork number) for the LOEDM entries. </simplePara>
+          <simplePara>Decision made by Project. Both issue date and issue number are required. Inwork number shall not be presented.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00041. Decide whether to present the applicability information for the LOEDM entries. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00042. Decide whether to use Highlights with updating instructions or not. </simplePara>
+          <simplePara>Decision made by Project. Highlights with updating instructions shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00043. Decide whether to present the issue date or the issue number (with or without inwork number) for the Highlights entries. </simplePara>
+          <simplePara>Decision made by Project. Not applicable (refer to BRDP-S1-00042).</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00044. Decide whether to present the applicability information for the Highlights entries. </simplePara>
+          <simplePara>Decision made by Project. Not applicable (refer to BRDP-S1-00042).</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00045. Decide whether to present the issue date and/or the issue number (with or without inwork number) that apply to the TOC entries. </simplePara>
+          <simplePara>Decision made by Project. Both issue date and issue number are required. Inwork number shall not be presented.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00046. Decide whether to use a linear or a hierarchically subdivided TOC. </simplePara>
+          <simplePara>Decision made by Project. For CMP, a hierarchical TOC shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00048. Decide whether the project will allow the exchange of draft data modules. </simplePara>
+          <simplePara>Decision made by Project. Exchange of draft DM with supplier of DM. inWork different from 00 allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00049. Decide on the definition of the issue date. This can be, for example, the input date (ie, the release to CSDB date), or the cut-off date for the delivery, etc. </simplePara>
+          <simplePara>Decision made by Project. For CMP, DMs the definition of the issue date is the date it is released.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00050. Decide on the source of the technical names and use them consistently across the project. In all cases, the technical name must reflect the item represented by the SNS. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00051. Decide on which information codes apply to the project. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00055. Decide on the priorities and relationships between the attributes securityClassification, commercialClassification and caveat if they are used. </simplePara>
+          <simplePara>Decision made by Project. securityClassification must always be 01.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00057. Decide whether to differentiate data restrictions information based on Product configuration. </simplePara>
+          <simplePara>Decision made by Project. N/A, since no applicability is being used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00058. Decide whether to include export controls, handling, destruction notices and disclosure instructions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00059. Decide on the distribution information contained in the element &lt;dataDistribution&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00060. Decide whether and how to use the element &lt;dataHandling&gt;. For example, the handling requirements and procedures that must be applied to a data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00061. Decide whether to use the element &lt;dataDestruction&gt; and how to use it. For example, the appropriate extent of destruction instructions that must be applied to a data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00062. Decide whether and how to use the element &lt;dataDisclosure&gt;. For example, the requirements that must be applied to a data module with regard to disclosure instructions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00063. Decide whether to use the element &lt;supersedure&gt; and how to use it. For example, the requirements that must be applied to a data module with regard to supersedure notices. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00064. Decide whether and how to use the element &lt;restrictionInfo&gt;. For example, the content and extent of restriction information to include in a data module. </simplePara>
+          <simplePara>Decision made by Project. &lt;restrictionInfo&gt; shall be used for incorporating the copyright.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00066. Decide whether to populate copyright information in each data module or whether to cross-reference to a copyright data module. Note While choosing the population method, assess the impact of changes to copyright information on updating of data modules. </simplePara>
+          <simplePara>Decision made by Project. Copyright shall be contained in all DM.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00067. Decide whether to use the element &lt;policyStatement&gt;. </simplePara>
+          <simplePara>Decision made by Project. &lt;policyStatement&gt; shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00068. Decide whether to use the element &lt;dataConds&gt;. </simplePara>
+          <simplePara>Decision made by Project. &lt;dataConds&gt; shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00069. Decide whether to use the element &lt;logo&gt;and how it should be used at presentation. </simplePara>
+          <simplePara>Decision made by Project. &lt;logo&gt; shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00072. Decide whether to use the element &lt;techStandard&gt;. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00073. Decide whether and how to use the element &lt;authorityInfo&gt;. </simplePara>
+          <simplePara>Decision made by Project. authorityInfo to be used for linking the DM with the applicable Engineering Bulletins</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00074. Decide whether and how to use the element &lt;techPubBase&gt;. If used, agree on acceptable values for the publication baseline and where they are derived from. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00075. Decide how to use the element &lt;authorityNotes&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00076. Decide whether to use attribute applicRefid on QA information. </simplePara>
+          <simplePara>Decision made by Project. Not applicable. Only one qa element will be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00077. Decide whether the project will allow the exchange of draft data modules. </simplePara>
+          <simplePara>Decision made by Project. Exchange of draft DM with supplier of DM. QA of unverified allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00081. Decide how to populate the attribute functionalItemNumber of the element &lt;functionalItemRef&gt; when this element is used. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00082. Decide whether and how to use the attribute manufacturerCodeValue of the element &lt;functionalItemRef&gt;. If used, the element must be populated consistently across the project. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00084. Define the values to use for the attribute safetyLabel. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00086. Decide whether and how to use the attribute applicRefId of the element &lt;remarks&gt; in the element &lt;dmStatus&gt;. The element &lt;remarks&gt;can contain remarks, which can be differentiated based on Product configuration. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00087. Decide whether export control regulations apply. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00088. Decide on the requirements and procedures that must be applied to a data module regarding export controls. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00089. Decide standard reason for update sentences to be used. Reason for update can be used to automatically generate a highlights data module. Normally, a project will mandate its use from issue "002" upwards. Examples are: Revised to incorporate modification XYZ Deleted. Data module no longer required </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00090. Decide whether the element &lt;reasonForUpdate&gt; is used during the production process. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00091. Decide whether it is permissible to differentiate reasons for update based on Product configuration. </simplePara>
+          <simplePara>Decision made by Project. Shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00092. Decide whether and how to use change marks for tables. </simplePara>
+          <simplePara>Decision made by Project. For changes to content within a table, the element changed will be marked.  For new tables, change markup will be applied to the complete table element. The table title will be marked only for changes to the title.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00093. Decide whether and how to use change marks for figures. </simplePara>
+          <simplePara>Decision made by Project. When modifying a graphic within a figure, change markup will be applied only at the sheet level &lt;graphic&gt;. For new graphics added to existing figures, change markup may be applied at the sheet level and the figure level.  For new figures, change markup will be applied to the complete figure element. The figure title will be marked only for changes to the title.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00094. Decide on the extent of cross-referencing within data modules and the methods used for populating the various attributes. </simplePara>
+          <simplePara>Decision made by Project. internalRef links are not to be defined to figAlts elements.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00097. Decide whether to present the target titles given in the element &lt;title&gt;. Note Presentation of the titles depends on the presentation system and its settings. </simplePara>
+          <simplePara>Decision made by Project. Attribute targetTitle shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00099. Decide whether to use any of the "identifiers" given in the elements &lt;reqSupportEquips&gt;, &lt;reqSupplies&gt;, &lt;reqSpares&gt; or &lt;workLocation&gt; as the presented link (textual content of the element &lt;internalRef&gt;), or as a tooltip in a viewer application (value of the attribute targetTitle). Note The "identifiers" can be derived from the content of the child elements or the attributes of the four elements. </simplePara>
+          <simplePara>Decision made by Project. The identifiers of the given elements shall be printed. For supplies, spares and support equipment: name element. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00101. Decide whether the values of the cross-reference attributes id and internalRefId must be prefixed by alpha characters that identify the type of the target element. Example: Structure: Prefix followed by a hyphen and a four digit number to make it unique within the data module (eg, "par-0001"). Prefixes: "fig" for figures and alternates "tab" for tables "mma" for multimedia and alternates "sup" for supplies "seq" for support equipment "spa" for spares "par" for levelled paragraphs and alternates "stp" for steps of procedure, fault isolation, etc, and alternates "gra" for graphics (multiple sheets) "mmo" for multimedia objects "hot" for hotspots (eg, "fig-0001-hot-0002") "pme" for parameters "zon" for zones "wla" for work locations "mat" for single material or material sets "acp for access points Note The four digit number has no connection to, eg, the figure or table number which is generated for data module presentation. For example, the value of the attribute id can be "fig-0345" for "Fig 1". Refer to Para 2.1. Note Refer to Chap 3.9.5.2.1.10 for the equivalent business rule decision point regarding footnotes. Example: "ftn-0001". </simplePara>
+          <simplePara>Decision made by Project. Patterns shall not be enforced.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00102. Decide whether to use the attribute referredFragment and, if used, list the precautions. </simplePara>
+          <simplePara>Decision made by Project. see BRDP-S1-00094</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00106. Decide if and how the element &lt;refs&gt; is populated. If populated, the order of items in the list must be specified. </simplePara>
+          <simplePara>Decision made by Project. If used, the &lt;refs&gt; element will not be displayed in the rendered PDF</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00107. Define the words before and after the elements &lt;dmRef&gt;, &lt;pmRef&gt; and &lt;externalPubRef&gt;. This is important as it has implications on the stylesheets used. Example: For one implementation, the stylesheet can automatically generate the words "Refer to data module: " when it recognizes the element &lt;dmRef&gt;. This will cause problems if the author has written "Refer to " within the paragraph before the element &lt;dmRef&gt;. </simplePara>
+          <simplePara>Decision made by Project. The words before references, like 'refer to' shall be entered manually in the data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00108. Decide whether to use titles for each of the sequential, random and definition lists. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00110. Decide whether to use definition list headers. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00112. Decide whether to use the attribute tableOfContentType, (eg, for Table of contents in Flight reference cards). </simplePara>
+          <simplePara>Decision made by Project. The attribute tableOfContentType shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00113. Decide whether the attributes rowsep and colsep rules between &lt;captionEntry&gt; elements are required. </simplePara>
+          <simplePara>Decision made by Project. Captions shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00114. Decide whether the element &lt;captionEntry&gt; spans are to be defined locally or by the element &lt;spanspec&gt;. </simplePara>
+          <simplePara>Decision made by Project. Captions shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00115. Decide whether to use the attribute color, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. Captions shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00116. Decide whether and how to use the attribute systemIdentCode. </simplePara>
+          <simplePara>Decision made by Project. Captions shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00117. Decide whether inline captions affect the text line spacing and how this is defined </simplePara>
+          <simplePara>Decision made by Project. Captions shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00118. Decide whether and how to use the element &lt;title&gt;. </simplePara>
+          <simplePara>Decision made by Project. A primary step or paragraph in a DM must have a title, even if this replicates techName and infoName.
+A step/paragraph must have a title if any of its sibling steps/paragraphs have a title.
+A step/paragraph can have a title only if its parent step/paragraph has a title</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00119. Decide whether to allow cross-referencing from titles. </simplePara>
+          <simplePara>Decision made by Project. No links within titles and its descendants</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00120. Decide whether titles can be included for the elements &lt;levelledPara&gt; and &lt;proceduralStep&gt; from sublevel six thru eight when converting legacy data to S1000D. </simplePara>
+          <simplePara>Decision made by Project. There will be a maximum of six levels, while the sixth level must not have a title.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00121. Decide if a list of standard table types applies to the project (eg, inspection, examination) and define what the business rules are for these types in terms of their presentation requirements and certain textual values (eg, titles and heading row values). Each of these standard types must have a defined value that can be applied to the table’s attribute tabstyle. </simplePara>
+          <simplePara>Decision made by Project. For paper presentations the attribute tabStyle shall have a value of "oversize" to render a table to an 11" x 17" page size. The attribute orient shall be used to select either landscape or portrait orientation of the table.
+Both attributes can be used independently or in conjunction with each other.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00123. Decide whether and how to use the attribute applicRefId of various &lt;table&gt; child elements. The child elements can be differentiated based on Product configuration. </simplePara>
+          <simplePara>Decision made by Project. Applicability is allowed at table and row levels but not at entry level. Applicability is also allowed on entry sub-elements.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00124. Decide whether and how to use the attribute applicRefId of various &lt;figure&gt; child elements. The child elements can be differentiated based on Product configuration. </simplePara>
+          <simplePara>Decision made by Project. Figure graphic applicability is required unless it is equal to the Data Module applicability.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00125. Decide whether to use hotspots. </simplePara>
+          <simplePara>Decision made by Project. Hotspots to be used in the IPD.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00127. Decide whether the element &lt;listItemTerm&gt; is to contain a leading zero when using callout/item numbers. The default is no leading zero. </simplePara>
+          <simplePara>Decision made by Project. no leading zeros</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00128. Decide on the strategy for legends. Legends can appear as part of the illustration or as text using the element &lt;legend&gt;. The advantage of making the legend part of the text is that: the same illustration can have different legends wherever it appears (eg, in multi-language projects) the text of the element &lt;legend&gt; can be searched (this might not be the case if the legend is part of the illustration) items in the illustration can be linked to the legend by the use of hotspots the legend in the text can save space on the illustration (particularly when the legends are long) </simplePara>
+          <simplePara>Decision made by Project. Legends shall use the &lt;legend&gt; element.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00130. Decide what types of multimedia objects are permitted. </simplePara>
+          <simplePara>Decision made by Project. Video (avi, wrl) and Audio (wav) files allowed</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00132. Decide whether and how to use hotspots. If hotspots are to be used decide whether hotspots can be used to link to graphical objects from local text If hotspots are to be used decide whether hotspots can be used to link from graphical objects to other graphical objects or local text If hotspots are to be used decide whether hotspots can be used to link from graphical objects to other data modules </simplePara>
+          <simplePara>Decision made by Project. Hotspots to be used in the IPD.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00134. Decide whether to use the element &lt;preliminaryRqmts&gt; in maintenance planning, fault isolation, maintenance checklist and/or process data modules. </simplePara>
+          <simplePara>Decision made by Project. Use of the element &lt;preliminaryRqmts&gt; is allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00136. Decide whether and how to use the element &lt;workLocation&gt;. If used, decide which data module types it will be used with. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00137. Decide whether and how to use the element &lt;workArea&gt;. If used, decide which data module types to use it. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00138. Decide whether and how to use the element &lt;installationLocation&gt;. If used, decide which data module types to use it. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00139. Decide whether and how to use the element &lt;productItem&gt;. If used, decide which data module types to use it. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00140. Decide whether and how to use the attribute productItemName. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00141. Decide whether and how to use the attribute productItemType. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00142. Decide whether and how to use the element &lt;taskDuration&gt;. The possibility of duplication and mismatch of data given in the maintenance planning information must be taken into account. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00143. Decide if a circuit breaker list is to be considered as part of preliminary conditions and thus the use of the element, or if the circuit breaker settings are part of the steps. In this latter case the element &lt;circuitBreakerDescrGroup&gt; in steps content can be used. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00145. Define a list of categories (eg, Electrician, Propulsion engineer, Maintainer). </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00146. Define a list of trades/trade codes. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00147. Decide whether and how to use the element &lt;reqTechInfoGroup&gt;. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00148. Decide whether to use the attribute reqTechInfoCategory, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. Note Technical information needed, can be presented in Required technical information (using the element &lt;reqTechInfoGroup&gt;) and/or in the Reference table (using the element &lt;refs&gt; in the element &lt;content&gt;). </simplePara>
+          <simplePara>Decision made by Project. The attribute reqTechInfoCategory will not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00149. Decide what types of standard tools or toolkits to be identified and listed in the table "Support equipment". </simplePara>
+          <simplePara>Decision made by Project. Any tool called out in a procedure must be listed in the Preliminary requirements.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00153. Decide whether and how to use the element &lt;natoStockNumber&gt;. </simplePara>
+          <simplePara>Decision made by Project. &lt;natoStockNumber&gt; may be used only for military derivatives of Civil Aviation products.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00157. Decide whether to use the element &lt;closeRqmts&gt; in the process data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00158. Decide whether to use the attribute circuitBreakerAction. If used, establish writing rules to ensure that authors will be consistent in the paragraph text and the value of the attribute itself. </simplePara>
+          <simplePara>Decision made by Project. circuitBreakerAction shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00159. Decide whether to use and how to populate the attribute checkSum. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00162. Decide whether to use the attribute quantityType, which values to use in what context and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. Note The project or the organization must also consider that data modules can be less portable if the quantity data types are extended in the BREX file past the standard types. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00163. Decide whether and how to use to use the element &lt;quantityValue&gt; and the element &lt;quantityTolerance&gt; decomposition. </simplePara>
+          <simplePara>Decision made by Project. If &lt;quantityValue&gt; is used, any associated tolerances must also be tagged using the &lt;quantityTolerance&gt; element. This does not preclude providing a range of values using the quantityGroupType attribute.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00164. If using the value and tolerance decomposition, decide at which level of the markup the attribute quantityUnitOfMeasure is to be included. Allowable locations are on the parent element &lt;quantityGroup&gt; which applies to all child elements or on the individual child elements &lt;quantityValue&gt; and &lt;quantityTolerance&gt;. A consistent usage of the attribute quantityUnitOfMeasure is required to produce a consistent display or printout to the user. </simplePara>
+          <simplePara>Decision made by Project. quantityUnitOfMeasure to be used incl. child elements</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00165. Decide whether to use the attribute quantityUnitOfMeasure, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. Note Due to the large number of units of measure, it is expected that a project will only use a small subset of the available units of measure. It must also be considered that data modules can be less portable if the units of measure types are extended by the BREX mechanism past the standard types. </simplePara>
+          <simplePara>Decision made by Project. quantityUnitOfMeasure to be used incl. child elements, not more than metric and imperial units are to be used (length, time, weight, torque, temperature, pressure…)</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00168. Decide whether to use the attribute accessPointTypeValue, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00171. Decide whether and how to use symbols using the text element &lt;symbol&gt;. </simplePara>
+          <simplePara>Decision made by Project. &lt;symbol&gt; may be used where needed as inline graphic.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00173. Decide on the types of footnote markers (attribute footnoteMark) to use. It is recommended to use: only one type of footnote marker for each of the table footnotes and the inline footnotes throughout a project superscripted numbers for both. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00177. Decide whether to use the element &lt;commonInfo&gt; in procedural, maintenance planning, common repositories, and/or fault data modules. </simplePara>
+          <simplePara>Decision made by Project. &lt;commonInfo&gt; may be used in procedures.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00178. Decide which markup method to use for common information text: the method containing &lt;note&gt;, &lt;para&gt; and &lt;commonInfoDescrPara&gt; or the method containing only &lt;commonInfoDescrPara&gt; </simplePara>
+          <simplePara>Decision made by Project. &lt;note&gt;, &lt;para&gt; and &lt;commonInfoDescrPara&gt; shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00179. Decide on the level of granularity of the descriptive data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00181. Decide whether to impose a minimum of two occurrences of child elements &lt;levelledPara&gt; and/or &lt;levelledParaAlts&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00182. Decide whether to use the element &lt;commonInfo&gt;, when to use the element, and give guidance and rules that will make sure it is consistently used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00185. Decide whether to use the alternates concept for steps, figures and multimedia within the element &lt;mainProcedure&gt;. This concerns the child elements &lt;proceduralStepAlts&gt; (refer to Para 2.4.2), &lt;figureAlts&gt; (refer to Chap 3.9.5.2.1.7) and &lt;multimediaAlts&gt; (refer to Chap 3.9.5.2.1.7). </simplePara>
+          <simplePara>Decision made by Project. Alternates shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00190. Decide whether to use the attribute altsName for the element &lt;proceduralStepAlts&gt; for steps. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00191. Decide whether and how to use the element &lt;title&gt; for steps. </simplePara>
+          <simplePara>Decision made by Project. If used, the element &lt;title&gt; shall be used to name the procedural step or sequence of steps, but shall not contain the action steps themselves.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00192. Decide whether to use the correlated fault concept. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00193. Decide how to populate element &lt;warningMalfunction&gt;, element &lt;assocWarningMalfunction&gt; and element &lt;bitMessage&gt; when using the correlated fault concept. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00194. Decide whether the repetition of the detection and description information for the basic fault which has been correlated (element &lt;faultDescr&gt; and element &lt;detectionInfo&gt;) is used. Projects can consider that the detection and description information can for example be populated during IETP generation by picking up the information in the detected fault list data module describing the basic faults. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00195. Decide whether to use the attribute independentCheck, which values to use and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00196. Decide whether to use the element &lt;title&gt; in fault isolation steps. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00197. Decide which values to use for the attribute inspectionTypeCategoryand allocate suitable definitions. . </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00198. Decide on a methodology of assigning tasks to groups. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00199. Decide whether to use the attribute markerType, which values to use and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00200. Decide whether to use the attribute worthinessLimit, which values to use and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00201. Decide whether to use the attribute reducedMaint, which values to use and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00202. Decide which values to use for the attribute sourceOfRqmt allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00203. Decide whether to use the attribute approval, which values to use and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00204. Decide whether to use the element &lt;preliminaryRqmts&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00205. Decide whether to use the attribute supervisorLevelCode, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00206. Decide whether to use of the element &lt;timeLimitCategory&gt; and define the values for the attribute timeLimitCategoryValue. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00207. Decide whether to use the element &lt;crewRefCard&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00208. Decide whether to use the element &lt;descrCrew&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00209. Decide whether to use the attribute independentCheck, which values to use and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00210. Decide whether to use the attribute drillType, which values to use and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00211. Decide whether to use the attribute skillLevelCode, which values to use and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00212. Decide whether to use the attribute crewStepCondition, which values to use and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00213. Decide which values to use for the attribute crewMemberType and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00214. Decide whether to use the attribute keepWithNext in the element &lt;crewDrillStep&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00216. Decide whether and how to use the NATO Stock Number, split it into its three fields using the attributes natoSupplyClass, natoCodificationBureau and natoItemIdentNumberCore or to fill it as a whole in the child element &lt;fullNatoStockNumber&gt;. </simplePara>
+          <simplePara>Decision made by Project. The element &lt;natoStockNumber&gt; shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00217. Decide whether to use the generic hotspot mechanism in IPD data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00222. Decide on the range and definitions of the values for the attribute unitOfMeasure. Note When the IP data modules are created from S2000M, the list of allowed UOM values must contain those defined in the data element definition in S2000M. When S2000M is used, it is strongly recommended to use the S2000M UOM values throughout the project. </simplePara>
+          <simplePara>Decision made by Project. The attribute unitOfMeasure shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00223. Decide on the method of identification of the optional part. </simplePara>
+          <simplePara>Decision made by Project. Optional parts shall be identified by Part Number and Manufacturer Code.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00224. Decide on the method of identification of the preferred spare part. </simplePara>
+          <simplePara>Decision made by Project. Preferred spare parts shall be identified by Part Number and Manufacturer Code.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00225. Decide on the method of identification of the altered from part. </simplePara>
+          <simplePara>Decision made by Project. Altered from parts shall be identified by Part Number and Manufacturer Code.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00226. Decide on the method of identification of the local fabrication material. </simplePara>
+          <simplePara>Decision made by Project. Manufactured from parts shall be identified by Part Number and Manufacturer Code.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00227. Decide whether to use the element &lt;selectOrManufactureFromIdent&gt;. If used, decide on its range and the definition of the values to be used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00231. Decide whether and how to use the element &lt;interchangeability&gt;. If used, decide on its range and the definition of the values to be used. When S2000M is used, the list must be as stated in the data element definition for the S2000M element ICY. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00233. Decide which values to use for the sixth character of the element &lt;sourceMaintRecoverability&gt; and allocate suitable definitions for the values. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00235. Decide whether and how to use the element &lt;effectivity&gt;. If used, decide on its range and the definition of the values to be used. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00238. Decide whether to produce wiring data description data modules in order to reflect all decisions concerning elements and attributes of the wiring data Schema. </simplePara>
+          <simplePara>Decision made by Project. Wiring data description data modules shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00239. Decide on the definition of wire type content/codes. </simplePara>
+          <simplePara>Decision made by Project. Wiring Schema shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00240. Decide whether and how to use the wire sequential number. Note The element &lt;wireSeqNumber&gt; must be used if the wire sequential number is not given in the element &lt;wireNumber&gt;. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00241. Decide whether and how to use electrical equipment connection information, in particular define the values of attribute connectionType consistently. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00242. Decide whether to use the attribute independentCheck, which values to use and allocate suitable definitions to the values </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00243. Decide whether to use the attribute skillLevelCode, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00244. Decide on the level of applicability filtering. This is established based on viewer capability and portability of the data. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00245. Decide whether and how to use the element &lt;dmLoop&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00246. Decide whether to use a dialog to assign values to an unassigned variable. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00247. Decide whether a variable default value will be displayed in a dialog. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00248. Decide on naming conventions to be used in setting variable names. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00249. Decide whether to use the attribute variableType and the rules for selection of the defined values. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00251. Decide whether to use the attribute altNumber, which values to use and allocate suitable definitions to the values. </simplePara>
+          <simplePara>Decision made by Project. No FIM repository to be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00252. Decide whether to use the attribute altNumber, which values to use and allocate suitable definitions to the values. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00253. Decide which values (eg, subzones) to use for the attribute zoneRefType and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00254. Decide whether to use the attribute altNumber, which values to use and allocate suitable definitions to the values. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00255. Decide which values (eg, subaccess points) to use for the attribute accessPointRefTypeand allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00256. Decide whether to use the attribute altNumber, which values to use and allocate suitable definitions to the values. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00257. Decide which values to use for the attribute lowestLevel and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00258. Decide whether to implement supply requirement CIR data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00259. Decide whether there is one single supply requirement CIR data module or several depending on the SNS. The application of the SNS determines the granularity of these data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00260. Decide which values to use for the attribute toolRefType and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00261. Decide whether to use the attribute altNumber, which values to use and allocate suitable definitions to the values. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00262. Decide which values (eg, servicing, maintenance, overhaul, repair) to use for the attribute taskCategoryCode and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00263. Decide whether to manage the system difference code in the functional and/or physical areas CIR data module. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00264. Decide whether to manage the disassembly code and disassembly variant code in the functional and/or physical areas CIR data module. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00265. Decide whether to use the container data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00266. Decide whether applicability annotations are duplicated from the referenced data modules to the container data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00267. Decide whether to conduct a performance analysis to determine factors that can affect performance and gaps in job performance or a training needs analysis to determine training requirements. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00268. Decide whether to develop learning objectives in accordance with task analysis items. Learning objectives ought to be developed in accordance with task analysis items that support system maintenance and operational procedures. Aligning learning objectives with task analysis items in the early content preplanning stages will foster reusable data and content alignment. Refer to Chap 3.9.7 for content preplanning discussions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00269. Decide whether to package lesson plans in SCORM content packages. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00270. Define life cycle need for analysis information and requirements resulting from a Performance Analysis for the client organization and human performance system affected by the product. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00271. Define life cycle need for analysis information and requirements resulting from a Training Needs Analysis for a training intervention. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00272. Decide whether to use of the element &lt;dmRef&gt; to establish references to content data supporting learning objective items. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00273. Decide whether to assign weighted values to individual interactions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00274. Decide whether to allow multiple response attempts for interaction items. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00275. Decide whether to use the attribute checkListCategory, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00276. Decide whether to use the element &lt;checkListIntervals&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00277. Decide whether and how to use the element &lt;checkListProcedure&gt; and its subelements. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00278. Decide whether to use the element &lt;equipmentNotAvailable&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00279. Projects must decide the maximum number of step levels allowed. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00280. Decide which topic type values are mandatory, which are optional and the sequence in which they must be delivered in the element &lt;sbRevisionInfo&gt;. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00281. Decide which topic type values are mandatory, which are optional and the sequence in which they must be delivered in the element &lt;sbSummary&gt;. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00282. Decide which topic values are mandatory, which are optional and the sequence in which they must be delivered in the element &lt;sbPlanningInfo&gt;. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00283. Decide which topic type values are mandatory, which are optional and the sequence in which they must be delivered in the element &lt;sbAdditionalInfo&gt;. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00284. Decide whether to use the attribute sbModificationClassification, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00285. Decide whether to use the attribute genericPropertyType, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00286. Decide whether to use the attribute sbMaterialType, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00287. Decide whether the use of the element &lt;sbProcurementInfo&gt; is allowed directly within the element &lt;sbMaterialSet&gt; is allowed only within definitions of individual material sets or is allowed only directly within definitions of individual spares, supplies and support equipment </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00288. Decide whether the use of the element &lt;sbIndustrySupport&gt; is allowed directly within &lt;sbMaterialSet&gt; is allowed only within definitions of individual material sets or is allowed only directly within definitions of individual spares, supplies and support equipment </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00289. Decide whether to use the attribute sbMaterialIdent. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00290. Decide whether to use the attribute sbMaterialIssue. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00291. Decide whether to use the attribute genericPropertyType, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. The predefined values are "gpt10" and "gpt11". </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00292. Decide whether to use the attribute genericPropertyType, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00293. Decide whether to use the attribute sbReplacementType. </simplePara>
+          <simplePara>Decision made by Project. N/A</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00294. Decide whether to use the element &lt;productIntroName&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00295. Decide whether and how to use the element &lt;productAndModel&gt; and its child elements. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00296. Decide whether and how to use the element &lt;dataRestrictions&gt; and its child elements. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00297. Decide whether and how to use the element &lt;enterpriseSpec&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00298. Decide whether to use the element &lt;enterpriseLogo&gt; and if it is populated from the element &lt;logo&gt; given in the Identification and status section. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00299. Decide whether and how to use the element &lt;logo&gt; in the Identification and status section to populate the element &lt;publisherLogo&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00300. Decide whether to use the attribute barCodeSymbology and which barcode symbology to be used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00301. Decide whether and how to use the element &lt;frontMatterInfo&gt; including the allowed values of attribute frontMatterInfoType and their interpretation as titles at presentation. Refer to Chap 3.9.6.1. Note The content given in the element &lt;title&gt; takes precedence over the interpretation of the value of attribute frontMatterInfoType. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00302. Decide whether to use the content of the element &lt;title&gt; or the interpretation of the value of the attribute frontMatterInfoType as the title of the Front matter information. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00303. Decide whether to use the introductory paragraph and on the wording of any standard phrase. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00304. Decide whether to use a hierarchical Table of contents and on the number of levels. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00305. Decide whether publications have to be listed by the publication only or also by its individual data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00306. Decide whether to use and present the issue number (&lt;issueInfo&gt;/&lt;externalPubIssueInfo&gt;) and/or the issue date (&lt;issueDate&gt;/&lt;externalPubIssueDate&gt;) for the entries in the Table of contents. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00307. Decide whether to use the element &lt;numberOfPages&gt; and if the number of pages are to be presented. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00308. Decide whether to use HIGH with updating instruction. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00309. Decide whether to use the introductory paragraph and on the wording of any standard phrase for each of the front matter list. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00310. Decide on the use of &lt;footnoteRemarks&gt; to store the total number of pages for a complete S1000D publication (PM). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00311. Decide on the use of &lt;footnoteRemarks&gt; to store the total number of pages for a complete non-S1000D publication. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00312. Decide whether to use the attribute scoEntryType, which values to use and allocate suitable definitions to the values. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00313. Decide whether and how to use the element &lt;contentDescription&gt; (eg, to add information about the training resource). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00314. Decide whether and how to use the element &lt;contentDescription&gt; (eg, to add information about the content defined in the training step). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00315. Decide whether the optional element &lt;contentDescription&gt; must be used to add information about the content defined in the training step. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00316. Decide how to use the element &lt;applic&gt; and to populate its child elements and attributes across the project. </simplePara>
+          <simplePara>Decision made by Project. Use &lt;applic&gt; element</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00317. Decide whether the element &lt;displayText&gt; is populated by the technical author or generated from the computable branch or some other source when using the human readable branch of applicability. </simplePara>
+          <simplePara>Decision made by Project. &lt;displayText&gt; shall be systematically generated</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00318. Decide whether to use the attribute applicDisplayClass, when using the computable applicability annotation branch. </simplePara>
+          <simplePara>Decision made by Project. The attribute applicDisplayClass shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00319. Decide if textual applicability annotations are allowed in the element &lt;assert&gt; when using the computable applicability annotation branch or if every element &lt;assert&gt; should reference a declared product attribute or condition. </simplePara>
+          <simplePara>Decision made by Project. Textual applicability annotations in the element &lt;assert&gt; are not allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00320. Decide whether to specify the allowable values for a product attribute achieved by using both the attribute valuePattern and the element &lt;enumeration&gt; or to allow open text without using the attribute valuePattern and the element &lt;enumeration&gt;. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00321. Decide whether to use the element &lt;displayName&gt;. </simplePara>
+          <simplePara>Decision made by Project. &lt;displayName&gt; is ALL</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00322. Decide whether to use a single element &lt;enumeration&gt; containing the entire set or to use multiple elements &lt;enumeration&gt; where each contains only one value or range. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00323. Decide whether to specify the allowable values for a product attribute achieved by using both the attribute valuePattern and the element &lt;enumeration&gt; or to allow open text without using the attribute valuePattern and the element &lt;enumeration&gt;. </simplePara>
+          <simplePara>Decision made by Project. Only one of &lt;enumeration&gt; or valuePattern may be used for a given condType.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00324. Decide whether to use a single element &lt;enumeration&gt; containing the entire set or to use multiple elements &lt;enumeration&gt; which each contain only one value or range. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00325. Decide whether to use the element &lt;displayName&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00326. Decide whether to constrain allowable conditions based on other condition values by use of the element &lt;dependency&gt;. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00327. Decide which product attributes and conditions to include in the PCT. Conditions that represent operational or environmental properties will usually not be included in the PCT as they are not associated with a product instance. </simplePara>
+          <simplePara>Decision made by Project. All the product attributes do not have to be used.
+Product instance identifiers:
+Required:
+1. Part Number (PNR): product attribute id = pnr
+2. Manufacturer Code (MFR): product attribute id = mfr
+One or more required:
+1. Model: product attribute id = model
+2. Component Nomenclature: product attribute id = cmpnom
+Condition types:
+1. Service bulletins: condition type id = sb, enumeration =
+PRE|POST.
+The only allowable service bulletin applicability assertion values for DMs are "PRE" and "POST".
+When using PRE|POST in a PCT, the service bulletin applicability assertion value of:
+• PRE resolves to true if the SB condition is PRE, or
+• PRE resolves to false if the SB condition is POST, or
+• POST resolves to true if the SB condition is POST, or
+• POST resolves to false if the SB condition is PRE, or
+• PRE and POST each resolve to true if the SB condition is null or missing.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00328. Decide whether to translate and use the "S1000D interpretation" of configurable attribute values in the languages adopted by the project. Note At no time must a project allocate values outside the ranges given in the subchapters. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00329. Decide whether to use any project specific attribute values, which values to use and allocate suitable definitions and interpretations. Note There are specific business rules decision points for some of the configurable attributes given in the authoring chapters. Refer to Chap 3.9.5 and its subchapters. </simplePara>
+          <simplePara>Decision made by Project. No specific attribute values shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00330. Decide if any project specific attribute values are needed for the attribute quantityUnitOfMeasure. If needed, decide which project specific values to use for the attribute quantityUnitOfMeasure and allocate suitable definitions. </simplePara>
+          <simplePara>Decision made by Project. No project specific attribute values shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00331. Decide on the data module coding strategy to use for the Product and/or the project. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00333. Decide whether to allow the use of one or several model identification codes. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00335. Decide whether to use UOC as the system difference code. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00336. Decide which SNS structure to use for the Product. </simplePara>
+          <simplePara>Decision made by Project. CMP rule:
+CMPs shall use the structure YY-YY-YY and in accordance
+with ATA iSpec 2200 Chapter 3-1-3, Paragraph 1.8, ATA
+Standard Number Breakdown.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00337. Decide on the use of the material item category code. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00339. Decide which responsible partner company codes to use for non-chapterized illustrated parts data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00340. Decide which responsible partner company codes to use for non-chapterized, non-S2000M illustrated parts data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00341. Decide which unique identifiers to use for non-chapterized, non-S2000M illustrated parts data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00344. Decide which method to be used for the ICN. </simplePara>
+          <simplePara>Decision made by Project. Base ICN on model identifier</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00345. Decide whether the ICN is presented within the illustration reproduction area. </simplePara>
+          <simplePara>Decision made by Project. ICN to be presented outsicde the illustration reproduction area</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00346. Decide whether to use the project´s or the originator's classification rules. Note </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00347. Decide which structure to use for the ICN (eg, only numerical, fixed length, use of character set). </simplePara>
+          <simplePara>Decision made by Project. The unique identifier consists of five alphanumeric characters chosen at discretion of AEC.
+Issue Number = 001 (increments of 1)
+Security Classification = 01</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00348. Decide which values on responsible partner company codes to be used. </simplePara>
+          <simplePara>Decision made by Project. L shall be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00349. Decided which security classifications to use. </simplePara>
+          <simplePara>Decision made by Project. securityClassification to be used is 01</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00350. Decide whether to use the data management requirement list for specification and exchange of CSDB planning information. </simplePara>
+          <simplePara>Decision made by Project. The DMRL shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00351. Decide whether to list publication modules and/or IPD illustrations in the data management requirement list. </simplePara>
+          <simplePara>Decision made by Project. PM and IPD ICN shall be listed in the DMRL.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00352. Decide whether to use the CSDB status list for exchange of CSDB status information. </simplePara>
+          <simplePara>Decision made by Project. CSL shall be delivered with each delivery.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00353. Decide what CSDB objects types are to be tracked in the CSDB status list, and at a minimum these must be data modules, illustrations/multimedia objects and publication modules. </simplePara>
+          <simplePara>Decision made by Project. The CSL of any shall include all objects that are valid at the time of delivery.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00354. Decide whether to include only the latest issues of CSDB objects or all issues in the CSDB status list. </simplePara>
+          <simplePara>Decision made by Project. Only the latest issue of the object delivered as part of the package will be included in the CSL.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00355. Decide whether the issue date of a data management requirement list must be the input date (the release to CSDB date), the cut-off date for the information, the planning date or some other more appropriate date. </simplePara>
+          <simplePara>Decision made by Project. The date of (planned) release to the customers is to be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00356. Decide whether to use the comment form. </simplePara>
+          <simplePara>Decision made by Project. The comment form shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00357. Decide which values to use for the attribute commentPriority and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. The element &lt;commentPriority&gt; shall not be used.  See BRDP S1-00356.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00358. Decide which values to use for the attribute responseType and allocate suitable definitions. Refer to Chap 3.9.6.1. </simplePara>
+          <simplePara>Decision made by Project. The element &lt;commentPriority&gt; shall not be used.  See BRDP S1-00356.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00359. Decide which file types are allowed for attachments to comment forms. </simplePara>
+          <simplePara>Decision made by Project. The element &lt;commentPriority&gt; shall not be used.  See BRDP S1-00356.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00360. Decide which resolution to use for raster graphics. </simplePara>
+          <simplePara>Decision made by Project. Vector graphics recommended. If raster is needed, 300dpi shall be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00361. Decide whether photographs will be used. If used, for what purposes. </simplePara>
+          <simplePara>Decision made by Project. Photographs shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00362. Decide whether logotypes are used in the publication module and the usage in front matter data module. </simplePara>
+          <simplePara>Decision made by Project. Shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00366. Decide whether to develop and use a project specific BREX data module. </simplePara>
+          <simplePara>Decision made by Project. LHT BREX to be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00367. Decide whether to apply a layered BREX data module structure. This decision is related to, but not entirely dependent on, whether a layered business rules structure applies. </simplePara>
+          <simplePara>Decision made by Project. A layered BREX data structure shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00368. Decide which set or sets of business rules are allowed within the given project or the organization. Accordingly, decide which BREX data modules will be used to reflect those business rules. </simplePara>
+          <simplePara>Decision made by Project. A project BREX DM will be created based on the decisions in this document.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00369. Decide whether to use the BREX data module for exchange of information on the applied SNS. </simplePara>
+          <simplePara>Decision made by Project. The SNS shall be coded in the BREX data module.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00370. Decide whether to use the BREX data module to impose any restrictions in the use of various formats for illustrations, multimedia objects or other data. </simplePara>
+          <simplePara>Decision made by Project. The BREX shall not be used to impose restrictions on the formats for graphic/multimedia objects.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00371. Decide whether to use the process data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00372. Decide whether to use IC 951 for identification of process data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00374. Decide whether to use the CIR concept. </simplePara>
+          <simplePara>Decision made by Project. CIR concept shall be used for warnings, cautions, tools, enterprise codes, parts (for IPL), supplies</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00375. Decide whether to produce CIR data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00376. Decide whether the CIR data modules are to be used only internally to the manufacturer or integrator, as part of the production/integration environment ("internal repositories") or if the CIR data modules are also a deliverable to the customer. </simplePara>
+          <simplePara>Decision made by Project. CIR data modules are a deliverable to the customer. The Enterprise CIR data module must be provided as a deliverable to the customer. Other CIRs must also be provided if referenced in the delivered data module.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00378. Decide whether CIR-dependent data modules are delivered to customer, as it implies a specific process to retrieve the self-standing data modules from the CIR-dependent data module and the CIR data module. </simplePara>
+          <simplePara>Decision made by Project. The CIR-dependent DM shall be delivered.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00379. Decide whether and which CIR data module types to be published. </simplePara>
+          <simplePara>Decision made by Project. The warning/caution and CIR shall be published. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00380. Decide whether there is one single or several data modules for a dedicated type of CIR data module within a Project or for a specific model identification code. </simplePara>
+          <simplePara>Decision made by Project. There shall be only one instance of each CIR type allowed/delivered.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00381. Decide whether to use implicit or explicit references, or both between content specific data elements and the CIR data modules. Note It is recommended to use only one method to avoid difficulties which might appear during the publishing process. </simplePara>
+          <simplePara>Decision made by Project. Explicit references shall be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00383. Decide whether alternates groups and elements can be mixed in a given structure. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00384. Decide whether to use container data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00385. Decide which identification method to use for container data modules. The chosen method must be used systematically. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00386. Decide whether applicability annotations are duplicated from the referenced data modules to the container data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00388. Define the required functionality for applicability. </simplePara>
+          <simplePara>Decision made by Project. Filtering per variant needed within certain model identifiers, so ACT per model identifier is needed
+Filtering per pre-/post-SB is planned for the future</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00389. If functionality is limited to print and static display, decide if applicability data module types (ACT, CCT, and PCT) will be used. </simplePara>
+          <simplePara>Decision made by Project. Use ACT for defining the part number and SB as filtering criteria, and PCT for the partnumber values, CCT for SB values</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00390. Define a consistent naming and identification scheme for product attributes and conditions, when ACT and CCT data modules are implemented. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00391. Specify the method that content is presented which is not valid for the current maintenance context. The content can be removed, hidden or de-emphasized in some manner. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00392. Decide whether to also provide the human readable part of applicability or rely on the viewer to build the human readable part, when providing the computer processing part of applicability. </simplePara>
+          <simplePara>Decision made by Project. displayName</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00393. Decide whether to provide one instance of each data module types (ACT, CCT and PCT) or to segregate the project into multiple instances of each data module type, and the method for segregation. </simplePara>
+          <simplePara>Decision made by Project. Only one instance is allowed for ACT, PCT, and CCT per CMP. Refer to BRDP-S1-00389.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00394. Decide how to divide the properties of the Product into product attributes or condition types. </simplePara>
+          <simplePara>Decision made by Project. Use ACT ("ALL") and PCT for SBs in the future</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00395. Decide on the extent of configuration management and editing access to be applied to product attributes within an ACT data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00396. Decide whether to use the incorporation status list in the CCT data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00397. Decide which product instances are contained in a PCT data module. Options include listing all product instances in service or listing only the product instances within an organization. </simplePara>
+          <simplePara>Decision made by Project. Use PCT for the partnumber values</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00398. Decide whether to publish a static issue of the PCT data module or use the data module as a transient transfer mechanism between an external system and a viewer. </simplePara>
+          <simplePara>Decision made by Project. shall be delivered</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00399. Decide how to maintain the list of product instance configuration specifications and the associated values for product attributes and conditions. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00400. Decide whether to use the ACT catalog data module. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00401. Decide whether the supplier applicability attributes are defined in the ACT data module or if the supplier definition is used. </simplePara>
+          <simplePara>Decision made by Project. The minimum supplier applicability attributes shall be defined in the CMP ACT DM (the internal method). Refer to BRDPS1-00327.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00402. Decide whether to use the attribute scoEntryType to indicate the required resource type. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00403. Decide which properties associated to the technical information objects (eg, names, short names) to store within the data module when delivered. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00404. Decide the applicable systems for land and sea products. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00405. Decide how to use the element field descriptions of the wiring data description Schema in an interactive wiring publication. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00406. Decide whether to produce introduction data modules for wiring publications. If required, the scope of these introduction data modules must be defined. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00407. Decide whether to produce descriptive information for connection units including illustrations and tables. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00408. Decide whether to produce descriptive information for wires and harnesses including illustrations and tables. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00409. Define source and scope of wiring standard practices data modules. Decide whether to prepare standard wiring practice information as procedural or descriptive data modules. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00410. Decide whether to produce wiring diagrams for an interactive wiring publication. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00411. Decide whether harness routing drawings are to be simplified and how their layout must look like. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00412. Decide whether to code harness installation drawing data modules by using zone information. If decided to use zone information for the coding, the structure of the data module code is possibly not appropriate. In this case, it must be decided on changes of the proposed structure for the Product (eg, population of the zone information in the unit or assembly group of the SNS instead of in the subsystem/sub-subsystem group). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00413. Decide whether to prepare harness installation information for each major area in list form in addition to or instead of harness installation and routing drawings. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00414. Decide whether to code harness routing drawing data modules by using zone information. If decided to use zone information for the coding, the structure of the data module code is possibly not appropriate. In this case, it must be decided on changes of the proposed structure for the Product (eg, population of the zone information in the unit or assembly group of the SNS instead of in the subsystem/sub-subsystem group). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00415. Decide whether to produce separate data modules containing equipment and panel location illustrations. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00416. Decide whether to produce data modules containing electrical standard parts data. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00417. Define the required information for each electrical or electronic item of equipment that has electrical connections. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00418. Decide whether to code electrical equipment information data modules by using zone information. If decided to use zone information for the coding, the structure of the data module code is possibly not appropriate. In this case, it must be decided on changes of the proposed structure for the Product (eg, population of the zone information in the unit or assembly group of the SNS instead of in the subsystem/sub-subsystem group). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00419. Decide whether to code harness data modules by using zone information. If decided to use zone information for the coding, the structure of the data module code is possibly not appropriate. In this case, it must be decided on changes of the proposed structure for the Product (eg, population of the zone information in the unit or assembly group of the SNS instead of in the subsystem/sub-subsystem group). </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00420. Decide whether and how to generate harness wire list data modules for a page-oriented or an interactive wiring publication from the wiring data modules that are based on the wiring Schema. </simplePara>
+          <simplePara>Decision made by Project. The Wiring schema will not be used for CMPs. Harness wire list data modules will use the Descript schema.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00421. Decide whether and how to generate connection list data modules for a page-oriented or an interactive wiring publication from the wiring data modules that are based on the wiring Schema. </simplePara>
+          <simplePara>Decision made by Project. The Wiring schema will not be used for CMPs. Connection list data modules will use the Descript schema.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00422. Decide whether and how to generate harness plug and receptacle list data modules for a page-oriented or an interactive wiring publication from the wiring data modules that are based on the wiring Schema. </simplePara>
+          <simplePara>Decision made by Project. The Wiring schema will not be used for CMPs. Harness plug list data modules will use the Descript schema.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00423. Decide whether and how to generate terminal list data modules for a page-oriented or an interactive wiring publication from the wiring data modules that are based on the wiring Schema. </simplePara>
+          <simplePara>Decision made by Project. The Wiring schema will not be used for CMPs. Terminal list data modules will use the Descript schema.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00424. Decide whether and how to generate splice list data modules for a page-oriented or an interactive wiring publication from the wiring data modules that are based on the wiring Schema. </simplePara>
+          <simplePara>Decision made by Project. The Wiring schema will not be used for CMPs. Splice list data modules will use the Descript schema.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00425. Decide whether and how to generate earth point list data modules for a page-oriented or an interactive wiring publication from the wiring data modules that are based on the wiring Schema. </simplePara>
+          <simplePara>Decision made by Project. The Wiring schema will not be used for CMPs. Earth point list data modules will use the Descript schema.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00426. Decide if front matter is to be authored as separate modules or use the consolidated Front matter Schema. </simplePara>
+          <simplePara>Decision made by Project. The Front Matter schema shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00427. Decide what level of detail to provide in the functional and technical descriptions. </simplePara>
+          <simplePara>Decision made by Project. Level of detail per Aircraft Document Definition Specification S-00-00/215</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00428. Decide whether the Wiring data Schema and the Wiring data description Schema are to be used or not. Interactive wiring publication functionalities are only to be made available if the Wiring Schema is used. Refer to Chap 3.9.5.2.9. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00429. Decide what level of detail to provide in the maintenance and servicing data modules. </simplePara>
+          <simplePara>Decision made by Project. Level of detail per Aircraft Document Definition Specification S-00-00/215</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00430. Decide how to implement the lists of consumables, materials, expendables, standard SE, special SE and tools. </simplePara>
+          <simplePara>Decision made by Project. Lists of consumables, materials, expendables, standard SE, special SE, and tools will be generated from the preliminary requirements.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00431. Decide whether to use equivalent substitutes for consumables, materials, expendables equipment and tools. </simplePara>
+          <simplePara>Decision made by Project. equivalents to be named in the appropriate DM</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00432. Decide what the level of detail to provide in the IPD modules. </simplePara>
+          <simplePara>Decision made by Project. Level of detail per Aircraft Document Definition Specification S-00-00/215</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00433. Decide whether to separate the BDARP into product frame and engine BDAR information. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00434. Decide whether to prepare separate data modules for degradation information, or to include this information in the damage assessment data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00435. Decide whether to produce an interactive BDARP and define the required functionalities. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00436. Decide whether material information must be a part of the "core" SB data module or if it can (depending on the volume) be presented in one or more referenced separate SB data modules. Refer to Fig 2. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00437. Decide whether or not to allow classifying service bulletins as Alert. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00438. Decide whether to use the four compliance categories or to define others. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00439. Decide the threshold for minimum impact on weight that must be reported in a SB. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00440. Decide the threshold for minimum impact on balance that must be reported in a SB. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00441. Decide the threshold for minimum impact on electrical load that must be reported in a SB. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00442. Decide on the precise definitions of "maintenance publications" and "operational publications" and whether to separate them into different listings in the Impact on publications. </simplePara>
+          <simplePara>Decision made by Project. SB schema shall not be used, information as procedural data.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00443. Agree on the scope and depth of the planning information. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00444. Agree on scope and depth of the training information. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00445. Decide whether to use a full set of data modules or a publication module to carry the listing of the applicable publications and other documents including individual data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00446. Decide whether to use the Front matter Schema or the Descriptive Schema for the publication list data modules. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00447. Decide whether to deliver the publications and documents listed in one data module/publication module (with one or more lists presented as tables) or as separate data modules/publication modules (eg, by operational publications or maintenance publications). </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00448. Decide whether to include publications and documents that are not published. Note When used as a contractual document, all publications and documents, published or not, must be included. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00449. Decide whether to markup the publication entry as a link when using the Descriptive Schema. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00450. Decide whether to include and present the manufacturer’s part No. or reference No. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00451. Decide whether to include and present the language of the publication or document in the entries. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00452. Decide whether to indicate additional information under the heading of the parts list "Remarks" (eg, modification number applicable to the item). </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00453. Decide on the standards of performance to be used in the calculation. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00454. Decide whether the conditions or phases of flight listing can be supplemented by projects conditions or phases. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00455. Decide which of the two models are used to structure checklists. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00456. Decide whether the order of drills will be project specific. Limitations and operating data required by the project must be included. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00457. Decide whether to supplement the order of drills checklist listing. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00458. Decide on the numbering of checks within each drill. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00459. Decide on the above description types to be used. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00460. Decide which front matter is to be included (mandatory or optional) in each of the page-oriented publications and in the IETP. The decisions must be based on the rules given in Chap 3.9.4. </simplePara>
+          <simplePara>Decision made by Project. Title page, LOEDM, HIGH, LOA, TOC</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00461. Decide which information codes to be used, the basic (eg, 00R) or the alternative (eg, 002). </simplePara>
+          <simplePara>Decision made by Project. Civil Aviation shall use the basic front matter information codes (third character alpha).</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00462. Decide if the IPD is produced as a standalone publication or as a part of for example an equipment maintenance publication. </simplePara>
+          <simplePara>Decision made by Project. IPD to be integrated in CMP</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00463. Decide which of the optional data from the parts data must be included and which optional elements must be displayed. </simplePara>
+          <simplePara>Decision made by Project. Optional Parts not to be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00464. Decide whether to use task sets in the CMP. </simplePara>
+          <simplePara>Decision made by Project. Task sets shall be allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00465. Decide whether "placeholder" data modules are required for those topics where data is not required or necessary. </simplePara>
+          <simplePara>Decision made by Project. Placeholder DMs are required in Civil Aviation.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00466. Decide what front matter data modules to be used and their content. </simplePara>
+          <simplePara>Decision made by Project. Title Page
+List Of Effective Data Modules
+Change Record
+Highlights
+List of Abbreviations
+List of Terms
+List of Symbols
+Technical Standards Record
+Table Of Content
+List Of Applicable Specifications and Documentation
+List Of Support Equipment
+List Of Supplies
+List Of Illustrations</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00467. Decide whether to include access illustration and its format for IETP. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00468. Decide on the updating frequency for incorporating service bulletins into the CMP. </simplePara>
+          <simplePara>Decision made by Project. Service bulletins shall be incorporated into the CMP in accordance with ATA iSpec 2200 chapter 3-1-9.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00469. Decide whether IPD information is to be provided as a separate publication. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00470. Decide whether to include maintenance planning information in the CMP. </simplePara>
+          <simplePara>Decision made by Project. Maintenance planning information shall not be included in the CMP.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00471. Decide whether to include removal and installation information in the CMP. </simplePara>
+          <simplePara>Decision made by Project. Removal and installation information shall not be included in the CMP.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00472. Decide whether to include manufacturer's test support data and its format. </simplePara>
+          <simplePara>Decision made by Project. Test support data shall be provided in accordance with ATA iSpec 2200 chapter 3-3-3.2.2.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00473. Decide whether to use the S1000D standard page-oriented presentation given in Chap 6.2.2 and Chap 6.2.3 or to use any other rules for presentation to meet specific project or organization requirements. The business rules must specify the information needed to contract the desired presentation. </simplePara>
+          <simplePara>Decision made by Project. Use ATA iSpec 2200 rules as much as possible.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00474. Decide whether to use mirrored headers and footers. </simplePara>
+          <simplePara>Decision made by Project. No mirrored headers and footers</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00475. Decide on the page size (including sizes when foldouts are allowed, see below) per publication. </simplePara>
+          <simplePara>Decision made by Project. Use A4 or ANSI A sizes. Foldout pages shall use A3 or ANSI B sizes. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00476. Decide in what circumstances (eg, interspersed or at the end of the publication) is presented in page-oriented publications. </simplePara>
+          <simplePara>Decision made by Project. No foldouts being used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00477. Decide whether to present the inwork markings. The details must be documented. </simplePara>
+          <simplePara>Decision made by Project. The issue number shall always be presented. The inwork number shall be presented only if the value is greater than "00". The inwork markings will be shown in accordance with Spec 1000BR Section 3-2.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00478. Decide whether to present or not the responsible producer of the page-oriented output and/or where the publication was printed. </simplePara>
+          <simplePara>Decision made by Project. “Printed in” and "Produced by" shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00479. Decide whether to use the S1000D standard page-oriented presentation rules for the publication module code or to create project or organization specific rules for its positioning and style within the header. </simplePara>
+          <simplePara>Decision made by Project. S1000D standard page-oriented rules shall be adopted. For publications with non-mirrored headers, “Outside” is considered to be the right side.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00480. Decide whether to use the S1000D standard page-oriented presentation rules for the data module code or to create project or organization specific rules for its positioning and style within the footer. </simplePara>
+          <simplePara>Decision made by Project. S1000D standard page-oriented rules shall be adopted. For publications with non-mirrored headers, “Outside” is considered to be the right side.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00481. Decide whether to use S1000D standard page-oriented presentation rules for the issue date or to create project or organization specific rules for its positioning in the bottom of the footer. </simplePara>
+          <simplePara>Decision made by Project. S1000D standard page-oriented rules shall be adopted. For publications with non-mirrored headers, "Outside" is considered to be the right side.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00482. Decide whether to use the S1000D standard page-oriented presentation rules for the page number or to create project or organization specific rules for its positioning in the footer. </simplePara>
+          <simplePara>Decision made by Project. S1000D standard page-oriented rules shall be adopted. For publications with non-mirrored headers, "Outside" is considered to be the right side.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00483. Decide whether to use double numbering of pages when printed on one (right-hand) side only (eg, 11/12, 13/14). </simplePara>
+          <simplePara>Decision made by Project. foldouts shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00484. Decide whether to use the S1000D standard page-oriented presentation rules for the applicability annotation or to create project or organization specific rules for the presentation. </simplePara>
+          <simplePara>Decision made by Project. In civil aviation applications, when Display Text is provided, it must be presented in the Applicability Annotation Block. S1000D standard page-oriented presentation rules shall be used. For publications with non-mirrored footers, “Inside” is considered to be the left side.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00485. Decide whether to present the security markings in sentence case instead of in uppercase. </simplePara>
+          <simplePara>Decision made by Project. Security markings shall not be presented.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00486. Decide whether to use the commercial classification (value of attribute commercialClassification) and/or national caveat (value of attribute caveat) as an alternative to the security classification (value of the attribute securityClassification). </simplePara>
+          <simplePara>Decision made by Project. Commercial classification and/or caveat as security markings shall not be used. See BRDP-S1-00054.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00487. Decide whether to exclude the presentation of security markings for unclassified publications or not. </simplePara>
+          <simplePara>Decision made by Project. Security markings shall not be presented.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00488. Decide whether to use the S1000D standard page-oriented presentation rules for the safety classification (attribute safetyLabel of the element &lt;productSafety&gt;) or to create project or organization specific rules for the presentation. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00489. Decide whether to present any of the logotypes given in the element &lt;logo&gt; and how this element is presented (eg, size, color). </simplePara>
+          <simplePara>Decision made by Project. &lt;logo&gt; will not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00490. Decide on the text that will be used to identify the end of a data module, either "End of data module" or "End of" followed by the data module title. </simplePara>
+          <simplePara>Decision made by Project. End of XXX will be used, where XXX is the Data Module Code without the DMC/DME prefix.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00491. Decide whether to present the "End of" statement in the footer or in the body of the page. </simplePara>
+          <simplePara>Decision made by Project. "End of" statement to be put in body of the page.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00492. Decide whether to use double column text, and under what circumstances. Typography for double column page layout must be documented. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00493. Decide whether to use double sided printing on foldout pages. Note A3L paper in A3L binders are normally printed on both sides. </simplePara>
+          <simplePara>Decision made by Project. foldouts shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00494. Decide whether to present the titles for the element &lt;proceduralStep&gt; and to which level. </simplePara>
+          <simplePara>Decision made by Project. If the titles are provided they must be presented.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00495. Decide whether to present the titles for the element &lt;crewDrillStep&gt; and to which level. Note Presentation of the titles for steps on level six thru level eight are not given. The use of these elements is discouraged and their use and presentation are project decisions. </simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00496. Decide whether to present the document title as a centerhead No. 1 and a centerhead No. 2 or as a centerhead No. 1 only (including both element &lt;techName&gt; and element &lt;infoName&gt;). </simplePara>
+          <simplePara>Decision made by Project. document title is centered and to include both element &lt;techName&gt; and element &lt;infoName&gt;</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00497. Decide whether to present more than three sidehead levels in the table of contents. </simplePara>
+          <simplePara>Decision made by Project. max. level shall be three</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00498. Decide whether to present the List of tables. </simplePara>
+          <simplePara>Decision made by Project. no list of tables to be presented</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00499. Decide whether to present the prefix "Table" before the table number in the List of tables. </simplePara>
+          <simplePara>Decision made by Project. no list of tables to be presented, no prefix required</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00500. Decide whether to present the List of figures. </simplePara>
+          <simplePara>Decision made by Project. List of Illustrations to be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00501. Decide whether to present the prefix "Fig" before the figure number in the List of figures. </simplePara>
+          <simplePara>Decision made by Project. no list of figures to be presented, no prefix required</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00502. Decide whether to use the S1000D standard presentation rules for titles (sidehead 1 thru sidehead 5 or if used thru sidehead 8) or to create project or organization specific rules such as type size, leading and justification. </simplePara>
+          <simplePara>Decision made by Project. Page-oriented presentation will be per Aircraft Document Definition Specification S-00-00/215</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00503. Decide whether to present the titles for the element &lt;levelledPara&gt; on level six thru eight. </simplePara>
+          <simplePara>Decision made by Project. Level 6-8 will not be used. Refer to BRDP-S1-00180.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00504. Decide whether to use the preferred or the alternative method for labeling procedural steps. </simplePara>
+          <simplePara>Decision made by Project. Civil Aviation will use the following alternative method:
+
+Information shall be prepared in modified block style. Subdivisions of text shall be identified and each breakdown shall be indented two spaces as shown by the following example:
+
+ 1. Major Breakdown (with title and underlined)
+  A. Major Subdivision (with title)
+    (1) Steps of Procedure (no title)
+      (a) Any necessary further breakdown of the steps
+        1 Any necessary further breakdown
+          a Any necessary further breakdown</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00505. Decide whether to use the recommended presentation rules for type size, spacing and justification. </simplePara>
+          <simplePara>Decision made by Project. Page-oriented presentation will be per Aircraft Document Definition Specification S-00-00/215</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00506. Decide whether to use hierarchical indented steps, when used without titles. </simplePara>
+          <simplePara>Decision made by Project. Hierarchical indented steps shall be used when used without titles.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00507. Decide whether to use a consistent set of prefixes for random list throughout the project. </simplePara>
+          <simplePara>Decision made by Project. Nested randomList should be avoided. The listItemPrefix attribute shall always be the default value, which is pf02.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00508. Decide whether to present the footnote markers as superscripted numbers (default) or as numbers presented within parenthesis. </simplePara>
+          <simplePara>Decision made by Project. Footnotes shall not be used</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00509. Decide whether to present the inline footnotes at the bottom of the page (default) or at the end of the data module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00510. Decide whether to present the footnotes on the relevant page, if the table is split over several pages. Refer to Fig 2 and Fig 3. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00511. Decide whether to, in exceptional cases, allow presentation of vertical lines in formal table. Note The rendering of the table must be based on the elements and attributes in the XML files. The author must apply elements and attributes as defined in Chap 3.9.5.2.1.6 in order to achieve the layout described in this chapter. </simplePara>
+          <simplePara>Decision made by Project. Vertical lines in tables are permitted.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00512. Decide whether to use one of the alternative methods for individual numbering of multi sheet illustrations. The chosen method must be used throughout the project. </simplePara>
+          <simplePara>Decision made by Project. The alternative methods are not allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00513. Decide whether to use the alternative rule to present the warnings before the step/para number. Note Projects must be aware of potential hazards when allowing step numbers to follow the warning and ensure that there is a clear connection in the presentation between the warning and the associated steps. </simplePara>
+          <simplePara>Decision made by Project. Alerts within a Step must appear before the Step number.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00514. Decide whether to present symbols in warnings and cautions. The symbols must be standardized and documented. </simplePara>
+          <simplePara>Decision made by Project. Symbols shall not be presented for warnings and cautions.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00515. Decide whether to use symbolic presentations of warnings and cautions. </simplePara>
+          <simplePara>Decision made by Project. No symbolic presentation.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00516. Decide whether to use numbered notes within a data module. </simplePara>
+          <simplePara>Decision made by Project. Numbered notes are not allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00517. Decide whether to display change marks. </simplePara>
+          <simplePara>Decision made by Project. Change marks shall be displayed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00518. Decide whether to use an alternative visual presentation as change marker </simplePara>
+          <simplePara>Decision made by Project. No alternative presentation of change marks allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00519. Decide whether to change mark individual table rules at presentation. </simplePara>
+          <simplePara>Decision made by Project. Individual table rows shall be marked as changed if applicable</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00520. Decide whether to present the data module title in the reference table ("Table 1  References"). </simplePara>
+          <simplePara>Decision made by Project. The References Table at the Data Module level is not used for CMPs.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00521. Decide whether to present the title (element &lt;pmTitle&gt;/&lt;externalPubTitle&gt;) or the short title (element &lt;shortPmTitle&gt;/&lt;shortExternalPubTitle&gt;), or both, in the reference table ("Table 1  References"). </simplePara>
+          <simplePara>Decision made by Project. The References Table at the Data Module level is not used for CMPs.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00522. Decide in which order the referenced document is presented in the reference table ("Table 1  References"): In order of appearance, alphabetical order, data modules before publications, etc. </simplePara>
+          <simplePara>Decision made by Project. The References Table at the Data Module level is not used for CMPs.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00523. Decide whether to present the external publication code (element &lt;externalPubCode&gt;), the title (element &lt;externalPubTitle&gt;) or the short title (element &lt;shortExternalPubTitle&gt;) as the inline reference. </simplePara>
+          <simplePara>Decision made by Project. Display the &lt;externalPubTitle&gt; and &lt;externalPubCode&gt;</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00524. Decide whether to present the name (element &lt;name&gt;) or the abbreviated alternate name (element &lt;shortName&gt;), as the cross-reference in the text. </simplePara>
+          <simplePara>Decision made by Project. The shortName shall be displayed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00525. Decide whether to use the preferred or the alternative method for presentation of applicability statements. </simplePara>
+          <simplePara>Decision made by Project. Applicability statements shall be presented before the steps or paragraphs to which they apply.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00526. Decide whether to highlight (bold) the default heading and applicability statement at presentation. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00527. Decide which elements and attributes to be presented on the Title page. Note The decisions must be coordinated/based on the Business rules decision points given in Chap 3.9.5.2.16. </simplePara>
+          <simplePara>Decision made by Project. Document number, Date, Type, Issue, copyright, last modified, number of pages (in PDF rendering)</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00528. Decide on the height of the product illustration on the Title page, if used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00529. Decide which elements and attributes to be presented on the Table of content page. Note The decisions must be coordinated/based on the Business rules decision points given in Chap 3.9.5.2.16. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00530. Decide which elements and attributes to be presented on the List of effective pages. Note The decisions must be coordinated/based on the Business rules decision points given in Chap 3.9.5.2.16. </simplePara>
+          <simplePara>Decision made by Project. List of Effective Pages shall not be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00531. Decide which elements and attributes to be presented on the List of effective data modules. Note The decisions must be coordinated/based on the Business rules decision points given in Chap 3.9.5.2.16. </simplePara>
+          <simplePara>Decision made by Project. No table of contents will be produced for IETP/HTML. 
+PDF table of contents will use the following elements and attributes: Follow Chapter 6.5 of the CMP S1000D BR</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00532. Decide which elements and attributes to be presented on the Highlights data modules. Note The decisions must be coordinated/based on the Business rules decision points given in Chap 3.9.5.2.16. </simplePara>
+          <simplePara>Decision made by Project. List header info
+- Title
+- Issue Number
+- Introductory paragraph
+List content
+- Data Module
+- Reason for update
+- Update Reason Type
+- Page Number</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00533. Decide whether to use the rules and guidance for look and feel, and printed output from an IETP detailed in Chap 6.3.1 or an alternate output specification. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00534. Decide which, if any, of the basic set of main menu bar functions to mandate. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00535. Decide whether to allow the printing of classified data. If not allowed, the print function must be disabled when classified data is presented in the IETP viewer </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00536. Decide on the use of an additional information bar. If used, it must be decided which information to be available in the additional information bar. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00537. Decide whether to use the functionality matrix. If used, fill in the functionality matrix. Refer to Chap 6.4.2. </simplePara>
+          <simplePara>Decision made by Project. Functionality Matrix is not being used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00538. Decide on which functionality is required in the technical publications. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00539. Decide on which functionality is required in the technical publications. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00540. Decide the preferred syntax to identify legacy data by a publication code. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00541. Decide whether to use the attribute pubCodingScheme. If used, decide on the set of allowed coding schemes and the syntax of those schemes. </simplePara>
+          <simplePara>Decision made by Project. Must be used. For any given external publication, a code and syntax should be assigned using pubCodingScheme.
+As follows:
+pubCodingScheme="AMM" = XX-XX-XX or XX-XX-XX-XXX
+pubCodingScheme="CMM" = XX-XX-XX</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00542. Decide whether to include legacy information by encapsulating it in data modules or by referencing it as external publications using the publication module. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00543. Decide the syntax and semantics of the links established to reference legacy data. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00544. Decide whether to use compression techniques on files being transferred and which techniques to be used. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00545. Decide which file formats, besides the S1000D standard formats, to use. </simplePara>
+          <simplePara>Decision made by Project. Only S1000D standard, SVG, and ATA CGM Profile file formats are permitted.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00546. Decide on the inclusion of RDF/DC metadata in data dispatch notes, data management lists and comments. It is recommended that inclusion is applied consistently across all CSDB objects. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00547. Decide on the format for generating the displayed applicability annotation from the computable applicability annotation that will best fulfill industry and/or customer display requirements. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00548. Decide if modifications to PCT assigned values are allowed. </simplePara>
+          <simplePara>Decision made by Project. Modifications to PCT assigned values are allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00549. Decide whether to translate and use the SNS titles and the definitions in the languages adopted by the project. </simplePara>
+          <simplePara>Decision made by TDWG. </simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00550. Decide and agree on allocation of project specific information codes and give them short and full definitions. </simplePara>
+          <simplePara>Decision made by Project. No project specific info codes to be used.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00551. Decide whether to translate and use the information code definitions in the languages adopted by the project. </simplePara>
+          <simplePara>Decision made by Project. Translation to languages other than U.S. English shall not be allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00552. Decide whether to translate and use the learn code definitions in the languages adopted by the project. </simplePara>
+          <simplePara>Decision made by Project. Translation to languages other than U.S. English shall not be allowed.</simplePara>
+        </nonContextRule>
+        <nonContextRule>
+          <simplePara>BRDP-S1-00553. Decide on the retention of derivative classifications changes.</simplePara>
+          <simplePara>Decision made by Project. shall not be used</simplePara>
+        </nonContextRule>
+      </nonContextRules>
+    </brex>
+  </content>
+</dmodule>

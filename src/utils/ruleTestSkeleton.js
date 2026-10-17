@@ -1,0 +1,2507 @@
+// Test rule (T2b): examples built on a real skeleton. Pure module (no React,
+// no API) so scripts/ can test it in plain Node.
+//
+// The LLM no longer writes whole documents. GET /api/schema-cards/structure
+// gives, per schema, a skeleton derived from the schema cards
+// (backend/app/services/rule_test_skeletons.py: root → … → insertion point,
+// normally <para>) plus the schema's complete element graph. Here:
+// - ruleTargets: which elements the rule checks (the last step of each of its
+//   paths), and the literal start of its absolute paths;
+// - chooseTestSchemas: the schema(s) the examples use;
+// - placeExample: where in the skeleton the LLM's content goes -- the
+//   skeleton's insertion point, or a shallower element of it when the rule
+//   checks something that cannot sit inside <para> (a <proceduralStep>, a
+//   <table>) or an element of the skeleton itself (the example that
+//   complies must be able to leave it out);
+// - assembleExample: the complete fragment (skeleton + content) that is run
+//   and shown, with xsi:noNamespaceSchemaLocation in the project's form;
+// The structural check of the examples (every element exists in the schema,
+// every child is allowed inside its parent, every attribute exists on its
+// element) is validation/schemaValidation.js's checkExampleStructure.
+//
+// DITA (T4): the "schemas" are the topic types (topic, concept, task,
+// reference, troubleshooting, map -- GET /api/schema-cards' document_schemas),
+// each with its own skeleton (topic/body, task/taskbody/steps/step, …). For
+// a Schematron rule, what it checks comes from its sch:rule contexts only
+// (the tests speak about the context node, not about where it sits); a
+// context anchored at the document root (/*, /topic) makes the example the
+// whole document: the LLM writes the complete root element.
+import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
+import { sectionCarrierWay, sectionRoutes } from './schemaPlacement.js';
+import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
+import { nodeTestKind, stripLiterals } from './ruleTestCommon.js';
+import { fragmentWellFormedProblem } from './ruleWrappers.js';
+import { comparisonPairs, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
+
+const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
+
+// ─── What the rule checks ───────────────────────────────────────────────────
+
+// Removes predicates ([…]) and string literals, keeping the rest in place.
+function stripPredicates(expression) {
+  let out = '';
+  let depth = 0;
+  let quote = '';
+  for (const ch of expression) {
+    if (quote) {
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '[') depth += 1;
+    else if (ch === ']') depth = Math.max(0, depth - 1);
+    else if (depth === 0) out += ch;
+  }
+  return out;
+}
+
+// The text inside the predicates ([…], nested ones included), one
+// fragment per top-level predicate, joined so the name extractor never glues
+// two of them together. String literals are kept (the extractor skips them).
+function predicateText(expression) {
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  let quote = '';
+  for (const ch of expression) {
+    if (quote) {
+      if (depth > 0) current += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      if (depth > 0) current += ch;
+      continue;
+    }
+    if (ch === '[') {
+      if (depth > 0) current += ch;
+      depth += 1;
+    } else if (ch === ']') {
+      depth = Math.max(0, depth - 1);
+      if (depth > 0) current += ch;
+      else {
+        parts.push(current);
+        current = '';
+      }
+    } else if (depth > 0) current += ch;
+  }
+  return parts.join(' , ');
+}
+
+// Splits on `sep` at parenthesis depth 0.
+function splitTopLevel(text, sep) {
+  const parts = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (depth === 0 && text.startsWith(sep, i)) {
+      parts.push(current);
+      current = '';
+      i += sep.length - 1;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+// Plantillas, Part 4: a BREX path can be a true/false condition
+// (s1kd-brexcheck evaluates it as such): //updateCode and (//zoneSpec or
+// //partIdent), not(//title), count(//para) > 2. Its operands are the
+// location paths the condition looks at -- split on top-level and/or and
+// comparisons, unwrapping parentheses and not()/boolean()/exists()/
+// empty()/count(). A node path comes back unchanged. Works on text whose
+// predicates and literals are already stripped.
+const CONDITION_WRAPPER_RE = /^(?:not|boolean|exists|empty|count)\s*\(/;
+function closesAtEnd(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i === text.length - 1;
+    }
+  }
+  return false;
+}
+// Split on a top-level word operator (and/or) or comparison.
+function splitTopLevelOperators(text, words) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    if (depth !== 0) continue;
+    if (words) {
+      const m = /^\s(and|or)\s/.exec(text.slice(i));
+      const before = text.slice(0, i).trimEnd().slice(-1);
+      if (m && before && !/[/@:]/.test(before)) {
+        parts.push(text.slice(start, i));
+        start = i + m[0].length;
+        i = start - 1;
+      }
+    } else {
+      const m = /^(?:!=|<=|>=|=|<|>|\s(?:eq|ne|lt|le|gt|ge)\s)/.exec(text.slice(i));
+      if (m) {
+        parts.push(text.slice(start, i));
+        start = i + m[0].length;
+        i = start - 1;
+      }
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+function conditionOperands(expression) {
+  const out = [];
+  const visit = (raw) => {
+    let e = raw.trim();
+    for (;;) {
+      if (e.startsWith('(') && closesAtEnd(e, 0)) {
+        e = e.slice(1, -1).trim();
+        continue;
+      }
+      const w = CONDITION_WRAPPER_RE.exec(e);
+      if (w && closesAtEnd(e, w[0].length - 1)) {
+        e = e.slice(w[0].length, -1).trim();
+        continue;
+      }
+      break;
+    }
+    if (!e) return;
+    const words = splitTopLevelOperators(e, true);
+    if (words.length > 1) return words.forEach(visit);
+    const sides = splitTopLevelOperators(e, false);
+    if (sides.length > 1) return sides.filter((side) => /^\s*[/(.@A-Za-z]/.test(side)).forEach(visit);
+    out.push(e);
+  };
+  visit(expression);
+  return out;
+}
+
+// Colocación, Part 1: the ancestor/parent tests of a predicate, alone or
+// joined by and/or, each with whether it is negated -- "not(ancestor::table)
+// and not(ancestor::preliminaryRqmts)" (BRDP-EXT-00023) → [{ axis:
+// 'ancestor', ancestor: 'table', negated: true }, { …preliminaryRqmts… }].
+// Other operands of the predicate give nothing; a test with more steps or a
+// predicate of its own (ancestor::x[@a], ancestor::x/y) is not one.
+const RELATION_TERM_RE = /^(ancestor|ancestor-or-self|parent)::([A-Za-z_][\w.-]*)$/;
+function relationTerms(predicate) {
+  const out = [];
+  const visit = (raw, negated) => {
+    let e = String(raw || '').trim();
+    while (e.startsWith('(') && closesAtEnd(e, 0)) e = e.slice(1, -1).trim();
+    const not = /^not\s*\(/.exec(e);
+    if (not && closesAtEnd(e, not[0].length - 1)) return visit(e.slice(not[0].length, -1), !negated);
+    const parts = splitTopLevelOperators(e, true);
+    if (parts.length > 1) return parts.forEach((part) => visit(part, negated));
+    const m = RELATION_TERM_RE.exec(e);
+    if (m) out.push({ axis: m[1] === 'parent' ? 'parent' : 'ancestor', ancestor: m[2], negated });
+  };
+  visit(predicate, false);
+  return out;
+}
+
+const NAME_RE = /^[A-Za-z_][\w.-]*$/;
+const AXIS_RE = /^(?:child|descendant|descendant-or-self|self|following-sibling|preceding-sibling|following|preceding|ancestor|ancestor-or-self|parent)::/;
+
+const PREFIXED_STEP_RE = /^[A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*$/;
+
+function stepName(segment) {
+  const step = segment.trim().replace(AXIS_RE, '');
+  return NAME_RE.test(step) ? step : null;
+}
+
+// One alternative of a path expression → the element its last step names
+// (the owner element for an attribute step), plus its literal absolute
+// prefix ("/dmodule/content//thead" → ["dmodule", "content"]). Each
+// alternative is also recorded on its own (out.alternatives: its element
+// steps, its trailing attribute, its absolute prefix), so the placement can
+// tell a rule about the data module's metadata from one about its content.
+// An alternative whose steps cannot be read (a function call, a variable, a
+// prefixed name, "..") is "opaque": nothing is concluded from it.
+function analyzeAlternative(alternative, out) {
+  const text = alternative.trim();
+  if (!text) return;
+  if (text.startsWith('(') && text.endsWith(')')) {
+    // "(//a | //b)" as a whole
+    let depth = 0;
+    let closesAtEnd = true;
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] === '(') depth += 1;
+      if (text[i] === ')') depth -= 1;
+      if (depth === 0 && i < text.length - 1) closesAtEnd = false;
+    }
+    if (closesAtEnd) {
+      for (const alt of splitTopLevel(text.slice(1, -1), '|')) analyzeAlternative(alt, out);
+      return;
+    }
+  }
+  const segments = splitTopLevel(text, '/');
+  let absolutePrefix = null;
+  if (text.startsWith('/') && !text.startsWith('//')) {
+    const prefix = [];
+    for (const seg of segments.slice(1)) {
+      const name = stepName(seg);
+      if (!name) break;
+      prefix.push(name);
+    }
+    if (prefix.length) {
+      out.absolutePrefixes.push(prefix);
+      absolutePrefix = prefix;
+    }
+  }
+  let checked = null;
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const seg = segments[i].trim();
+    if (!seg || seg === '.' || seg === '*' || nodeTestKind(seg)) continue;
+    if (seg.startsWith('@') || seg.startsWith('attribute::')) continue; // the owner is the previous step
+    if (seg.includes('(') || seg.includes(':') && !AXIS_RE.test(seg)) break; // a function call, a prefixed name
+    const name = stepName(seg);
+    if (name) {
+      out.checked.add(name);
+      checked = name;
+    }
+    break;
+  }
+  const steps = [];
+  let attribute = null;
+  let opaque = false;
+  // GMC, Part 2.2: element steps with a namespace prefix (rdf:Description).
+  // The structures list local names only, and the documents the examples
+  // are built on declare no other namespace: an example can never contain
+  // one (classifyRuleTargets counts the alternative as unreachable).
+  const prefixedSteps = [];
+  let descendantAttribute = false;
+  // Descendant steps "A//B" (or descendant::B): the pairs [A, B], so the
+  // prompt can give the valid nesting between them (nestingPaths).
+  const descendantPairs = [];
+  // The axis that leads to each element step: 'child' ("/x", child::x) or
+  // 'descendant' ("//x", descendant::x, a step after "*", or the first step
+  // of a relative or "//" path) -- the routes in the identification and
+  // status section keep "a/b" as b directly inside a (sectionRoutes).
+  // 'other' for any other axis (ancestor::, following-sibling::…): no
+  // constraint is drawn from it.
+  const axes = [];
+  let previous = null;
+  let descendant = false;
+  let wildcard = false;
+  let nodeTest = null;
+  segments.forEach((raw, i) => {
+    const seg = raw.trim();
+    if (!seg) {
+      if (i > 0) descendant = true; // the empty segment of "//"
+      return;
+    }
+    if (/^descendant(?:-or-self)?::node\(\)$/.test(seg)) {
+      descendant = true;
+      return;
+    }
+    if (seg === '.') return;
+    // Colocación, Part 1: a node test (text(), child::text(), node(),
+    // comment(), processing-instruction()) names no element: the checked
+    // element is the previous step, and the rule looks at its content
+    // (//assert/child::text() is placed as //assert). Recorded when it is
+    // the last step.
+    const kind = nodeTestKind(seg);
+    if (kind) {
+      if (i === segments.length - 1) nodeTest = kind;
+      return;
+    }
+    if (seg === '*') {
+      previous = null;
+      wildcard = true;
+      return;
+    }
+    const attr = /^(?:@|attribute::)([A-Za-z_][\w.-]*)$/.exec(seg);
+    if (attr) {
+      if (i === segments.length - 1) {
+        attribute = attr[1];
+        // GMC, Part 1.4: X//@a -- the attribute is on X's descendants that
+        // carry it, never on X itself (X/@a stays as before).
+        descendantAttribute = descendant && steps.length > 0;
+      } else opaque = true;
+      previous = null;
+      return;
+    }
+    const name = stepName(seg);
+    if (name) {
+      steps.push(name);
+      const axis = AXIS_RE.exec(seg)?.[0];
+      axes.push(
+        axis && !/^(?:child|descendant|descendant-or-self)::$/.test(axis)
+          ? 'other'
+          : descendant || wildcard || /^descendant/.test(axis || '') || (steps.length === 1 && !text.startsWith('/'))
+            ? 'descendant'
+            : 'child'
+      );
+      if (previous && (descendant || /^descendant(?:-or-self)?::/.test(seg))) descendantPairs.push([previous, name]);
+      previous = name;
+      wildcard = false;
+    } else {
+      const prefixed = PREFIXED_STEP_RE.exec(seg.replace(AXIS_RE, ''));
+      if (prefixed) prefixedSteps.push(prefixed[0]);
+      opaque = true;
+      previous = null;
+    }
+    descendant = false;
+  });
+  if (steps.length === 0 && !attribute) opaque = true;
+  out.alternatives.push({ steps, axes, attribute, checked, absolutePrefix, opaque, descendantPairs, prefixedSteps, descendantAttribute, nodeTest });
+}
+
+const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+const decodeEntities = (text) =>
+  text.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(lt|gt|amp|quot|apos));/g, (_m, dec, hex, name) =>
+    dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16)) : ENTITIES[name]
+  );
+// The @context of every Schematron rule (sch:rule, any prefix or none).
+const SCH_RULE_CONTEXT_RE = /<(?:[\w.-]+:)?rule\b[^>]*?\scontext\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+export function schematronContexts(ruleXml) {
+  const out = [];
+  for (const m of String(ruleXml || '').matchAll(SCH_RULE_CONTEXT_RE)) out.push(decodeEntities(m[1] ?? m[2]));
+  return out;
+}
+
+// T4b: the expressions whose nodes the rule runs on -- its Schematron
+// contexts, or its BREX paths -- whitespace collapsed, for the correction
+// request about an example that touches none of them.
+export function ruleMatchExpressions(ruleXml) {
+  const contexts = schematronContexts(ruleXml);
+  return (contexts.length ? contexts : extractRuleXPaths(ruleXml || '')).map((e) => e.replace(/\s+/g, ' ').trim());
+}
+
+// An XSLT pattern that matches only the document's root element: "/*",
+// "/topic", "/*[not(parent::*)]".
+function isRootContext(alternative) {
+  return /^\/(?:\*|[A-Za-z_][\w.-]*)$/.test(alternative.trim());
+}
+
+// { checked: [element names], absolutePrefixes: [[names]], wholeDocument }
+// wholeDocument: a Schematron context that matches the document's root
+// element -- the example has to be a whole document.
+// predicateNames: the element names the predicates of the rule's paths
+// (BREX) or contexts (Schematron) mention -- a rule whose path selects
+// content nodes but whose predicate reads the metadata
+// (//*[@changeMark = '1' and ancestor::dmodule[identAndStatusSection/dmStatus[…]]])
+// needs both parts written by the LLM; see classifyRuleTargets.
+// rootPredicates: the roots an absolute path puts a predicate on ("/ddn[…]"):
+// such an alternative looks at more than the document's type, so it is never
+// a "root only" part (placeExample).
+const ROOT_PREDICATE_RE = /(?:^|[\s(,|=!<>])\/([A-Za-z_][\w.-]*)\s*\[/g;
+export function ruleTargets(ruleXml) {
+  const out = { checked: new Set(), absolutePrefixes: [], alternatives: [] };
+  const contexts = schematronContexts(ruleXml);
+  const predicateNames = new Set();
+  const rootPredicates = new Set();
+  let wholeDocument = false;
+  for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
+    for (const m of stripLiterals(expression).matchAll(ROOT_PREDICATE_RE)) rootPredicates.add(m[1]);
+    const operands = contexts.length ? [stripPredicates(expression)] : conditionOperands(stripPredicates(expression));
+    for (const alternative of operands.flatMap((operand) => splitTopLevel(operand, '|'))) {
+      if (contexts.length && isRootContext(alternative)) wholeDocument = true;
+      analyzeAlternative(alternative, out);
+    }
+    for (const name of extractXPathNames(predicateText(expression)).elements) predicateNames.add(name);
+  }
+  return {
+    checked: [...out.checked],
+    absolutePrefixes: out.absolutePrefixes,
+    alternatives: out.alternatives,
+    predicateNames: [...predicateNames],
+    rootPredicates: [...rootPredicates],
+    wholeDocument,
+    ...predicateTargets(contexts.length ? contexts : extractRuleXPaths(ruleXml || '')),
+  };
+}
+
+// ─── What the checked step's condition needs (Test de reglas: referencias,
+// antepasados y reglas de esquema prohibido, Part 1) ──────────────────────────
+//
+// references (1a): the checked node's attribute compared with an absolute
+// path that ends in an attribute -- //internalRef[not(attribute::internalRefId
+// = //figure/@id or … = //table/@id)] (BRDP-EXT-00039, CMP 4.2): the
+// destinations an example meant to be accepted points to.
+//   [{ element, attribute, destinations: [{ name, attribute, path }] }]
+// chains (1b): a chain of ancestors in the condition --
+// ancestor::title/parent::definitionList/parent::legend/parent::figure
+// (BRDP-EXT-00008): the elements around the checked one, innermost first,
+// each with its link to the one inside it ('ancestor' | 'parent').
+//   [{ element, chain: [{ name, link }], path }]  -- two elements or more
+// looseAttributes (1c): an attribute with no element step, //@x or /R//@x,
+// inside a predicate -- /dmodule//@reasonForUpdateRefIds (BRDP-EXT-00181):
+// what carries it decides which part of the document the example writes.
+//   [{ attribute, root, path }]
+const OWN_ATTRIBUTE_RE = /^(?:\.\/)?(?:@|attribute::)([A-Za-z_][\w.-]*)$/;
+const CHAIN_AXES = new Set(['ancestor', 'ancestor-or-self', 'parent']);
+
+function lastElementStep(steps) {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const s = steps[i];
+    if (s.kind === 'element') return s;
+    if (s.kind === 'attribute' || s.kind === 'other' && nodeTestKind(s.main)) continue;
+    return null;
+  }
+  return null;
+}
+
+// An absolute path ending in an element step and an attribute step
+// (//figure/@id, /dmodule//figure/@id) → { name, attribute, path }, or null.
+function destinationOf(side) {
+  const text = side.replace(/\s+/g, ' ').trim();
+  if (!text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  const last = steps[steps.length - 1];
+  const owner = steps[steps.length - 2];
+  if (last?.kind !== 'attribute' || last.predicates.length || owner?.kind !== 'element') return null;
+  return { name: owner.name, attribute: last.name, path: text };
+}
+
+// A relative path made only of ancestor::/parent:: steps (and an attribute
+// at the end): ancestor::title/parent::definitionList/parent::figure/@id →
+// [{ name: 'title', link: 'ancestor' }, { name: 'definitionList', link:
+// 'parent' }, …], or null.
+function ancestorChainOf(operand) {
+  const text = operand.trim();
+  if (text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  const chain = [];
+  for (const [i, s] of steps.entries()) {
+    if (s.kind === 'attribute' && i === steps.length - 1) break;
+    if (s.kind !== 'axis' || !CHAIN_AXES.has(s.axis) || (i > 0 && s.sep !== '/')) return null;
+    chain.push({ name: s.name, link: s.axis === 'parent' ? 'parent' : 'ancestor' });
+  }
+  return chain.length ? chain : null;
+}
+
+// //@x, /R//@x (functions after it allowed: /R//@x/tokenize(…)) →
+// { attribute, root }, or null.
+function looseAttributeOf(operand) {
+  const text = operand.replace(/\s+/g, ' ').trim();
+  if (!text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  let i = 0;
+  let root = null;
+  if (steps[0]?.kind === 'element' && steps[0].sep === '/' && !steps[0].predicates.length) {
+    root = steps[0].name;
+    i = 1;
+  }
+  const attr = steps[i];
+  if (attr?.kind !== 'attribute' || attr.sep !== '//' || attr.predicates.length) return null;
+  if (steps.slice(i + 1).some((s) => s.kind !== 'other')) return null;
+  return { attribute: attr.name, root, path: text };
+}
+
+// Default BREX pass, Part 2.3: what the checked step's condition looks for
+// INSIDE the checked element, as a chain of element steps (descendant or
+// child), following the predicate of each step: //frontMatter[descendant-
+// or-self::pmRef[@id …]] → [{ name: 'pmRef', desc: true }];
+// //frontMatter[child::frontMatterTitlePage[child::publisherLogo[@id …]]] →
+// frontMatterTitlePage, publisherLogo. null for anything else (an
+// attribute, an ancestor axis, an absolute path).
+function innerChainOf(operand) {
+  const text = operand.trim();
+  if (!text || text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  const out = [];
+  for (const [i, s] of steps.entries()) {
+    if (s.kind !== 'element') break;
+    out.push({ name: s.name, desc: Boolean(s.desc) || s.sep === '//' });
+    if (i === steps.length - 1) {
+      for (const predicate of s.predicates) {
+        for (const op of pathOperands(predicate)) {
+          const more = innerChainOf(op);
+          if (more) return [...out, ...more];
+        }
+      }
+    }
+  }
+  return out.length ? out : null;
+}
+
+function predicateTargets(expressions) {
+  const inner = [];
+  const references = [];
+  const chains = [];
+  const looseAttributes = [];
+  const relations = [];
+  const addLoose = (operand) => {
+    const loose = looseAttributeOf(operand);
+    if (loose && !looseAttributes.some((l) => l.attribute === loose.attribute && l.root === loose.root)) looseAttributes.push(loose);
+  };
+  // Every predicate of every step, nested ones included: the loose attributes.
+  const visitPredicates = (path) => {
+    for (const alternative of pathAlternatives(path)) {
+      for (const step of pathSteps(alternative).steps) {
+        for (const predicate of step.predicates) {
+          for (const operand of pathOperands(predicate, { deep: true })) {
+            addLoose(operand);
+            visitPredicates(operand);
+          }
+        }
+      }
+    }
+  };
+  for (const expression of expressions) {
+    for (const operand of pathOperands(expression)) {
+      visitPredicates(operand);
+      for (const alternative of pathAlternatives(operand)) {
+        const checked = lastElementStep(pathSteps(alternative).steps);
+        if (!checked) continue;
+        for (const predicate of checked.predicates) {
+          for (const [a, b] of comparisonPairs(predicate)) {
+            for (const [own, other] of [[a, b], [b, a]]) {
+              const m = OWN_ATTRIBUTE_RE.exec(own.trim());
+              const destination = m ? destinationOf(other) : null;
+              if (!destination) continue;
+              let entry = references.find((r) => r.element === checked.name && r.attribute === m[1]);
+              if (!entry) {
+                entry = { element: checked.name, attribute: m[1], destinations: [] };
+                references.push(entry);
+              }
+              if (!entry.destinations.some((d) => d.name === destination.name && d.attribute === destination.attribute)) entry.destinations.push(destination);
+            }
+          }
+          // Colocación, Part 1: [not(ancestor::table) and
+          // not(ancestor::preliminaryRqmts)], also inside the operands of a
+          // true/false condition.
+          for (const term of relationTerms(predicate)) {
+            if (term.ancestor === checked.name) continue;
+            const relation = { element: checked.name, ...term };
+            if (!relations.some((r) => r.element === relation.element && r.axis === relation.axis && r.ancestor === relation.ancestor)) relations.push(relation);
+          }
+          for (const op of pathOperands(predicate)) {
+            const chain = ancestorChainOf(op);
+            if (chain && chain.length > 1) chains.push({ element: checked.name, chain, path: op.replace(/\s+/g, ' ').trim() });
+            // Part 2.3: only a chain the LLM can get wrong -- more than one
+            // step, or a descendant step (a direct child needs no way).
+            const steps = innerChainOf(op);
+            if (steps && (steps.length > 1 || steps[0].desc)) {
+              const key = `${checked.name}/${steps.map((s) => `${s.desc ? '/' : ''}${s.name}`).join('/')}`;
+              if (!inner.some((x) => x.key === key)) inner.push({ key, element: checked.name, steps });
+            }
+          }
+        }
+      }
+    }
+  }
+  // A chain that is the start of a longer one around the same element
+  // (ancestor::title and ancestor::title/parent::definitionList/…) adds
+  // nothing.
+  const key = (c) => c.chain.map((s) => `${s.link}:${s.name}`).join('/');
+  const kept = chains.filter(
+    (c, i) =>
+      chains.findIndex((d) => d.element === c.element && key(d) === key(c)) === i &&
+      !chains.some((d) => d !== c && d.element === c.element && d.chain.length > c.chain.length && key(d).startsWith(`${key(c)}/`))
+  );
+  // An ancestor a chain already starts with (ancestor::title and
+  // ancestor::title/parent::definitionList/…, BRDP-EXT-00008): the chain
+  // says the whole way, the relation adds nothing.
+  const uncovered = relations.filter((r) => !kept.some((c) => c.element === r.element && c.chain[0]?.name === r.ancestor));
+  return { references, chains: kept, looseAttributes, relations: uncovered, inner: inner.map(({ element, steps }) => ({ element, steps })) };
+}
+
+// ─── Which schemas the examples use ─────────────────────────────────────────
+
+// A general rule is tested on one schema: the first of these that has every
+// element step of the rule's paths (and the root of its absolute paths).
+const TEST_SCHEMA_PREFERENCE = ['descript', 'proced', 'process', 'fault', 'ipd', 'schedul', 'crew', 'comrep', 'sb'];
+
+// `elementSchemas` (DITA): { name: [topic types whose graph has it] } --
+// the merged DITA cards list a single schema, so the backend answers it.
+function schemasHavingAll(names, cards, documentSchemas, elementSchemas) {
+  const has = (name, schema) =>
+    elementSchemas && elementSchemas[name]
+      ? elementSchemas[name].includes(schema)
+      : (cards[name]?.variants || []).some((v) => (v.schemas || []).includes(schema));
+  return documentSchemas.filter((schema) => names.every((name) => has(name, schema)));
+}
+
+// TEST_SCHEMA_PREFERENCE first (S1000D), then the order the backend lists
+// them in (alphabetical for S1000D; topic, concept, task, … for DITA).
+function byPreference(schemas, documentSchemas = []) {
+  const rank = (s) => {
+    const i = TEST_SCHEMA_PREFERENCE.indexOf(s);
+    return i === -1 ? TEST_SCHEMA_PREFERENCE.length : i;
+  };
+  const listed = (s) => {
+    const i = documentSchemas.indexOf(s);
+    return i === -1 ? documentSchemas.length : i;
+  };
+  return [...schemas].sort((a, b) => rank(a) - rank(b) || listed(a) - listed(b) || a.localeCompare(b));
+}
+
+// { testSchema, otherSchema, groups }: the schema the rule's examples use,
+// and, for a rule limited to some schemas, the schema of the "does not apply
+// here" example (one that has the checked elements too, so the example can
+// show them). `cards` is GET /api/schema-cards's answer for the checked
+// names, the alternatives' steps and the absolute roots ({} when
+// unavailable).
+// groups: one schema per part of the rule, or null. A general rule whose
+// alternatives look at elements that live in different schemas (S1-00120:
+// //proceduralStep[…] | //levelledPara[…]) used to be tested on the only
+// schema that has them all ("sb"), where examples are almost impossible to
+// write. When no schema has them all, or the first that does is not the
+// preferred schema of any alternative, the alternatives are grouped by
+// their own preferred schema (the first, by preference, that has all their
+// element steps): [{ schema, alternatives, checked }], at least two groups
+// -- each tested with its own examples; the whole rule still runs on every
+// example. Otherwise null, and the single schema as before.
+//
+// `attributeSchemas` ({ attribute: [schemas that have an element carrying
+// it] }, from the attribute owners): an alternative that is only an
+// attribute (//@materialUsage) used to fit ANY schema, so it got descript,
+// where @materialUsage does not exist -- "not executable" for BRDP-S1-00151.
+// Now the chosen schema must also have a carrier of every such attribute,
+// and the groups place an attribute-only alternative by its own carriers.
+// An attribute that no schema carries (//@pokemon), or one not looked up,
+// does not narrow anything: the placement then says it is unreachable, as
+// before. An alternative with element steps (//supportEquipDescr/@x) does
+// not change.
+// `conditionRequirements` (Mejoras F, Part 1.3): [[names of one absolute
+// path, …], …] -- an "and" operand of the checked step's condition, not
+// negated, that is an absolute path or an "or" of them
+// (rulePathCheck.js's absoluteConditionRequirements). The chosen schema
+// must have every element of at least one of each; none does →
+// { noConditionSchema: requirement }. No new groups are made for it.
+//
+// Default BREX pass, Part 2.1: a reference (//internalRef[@internalRefTargetType
+// = "irtt04" and not(@internalRefId = //supplyDescr/@id) …], BRDP-EXT-00046)
+// needs a schema that has at least one of its destinations -- the example
+// meant to be accepted points to one. descript has <internalRef> but no
+// <supplyDescr>, so the accept example could only point to nothing and the
+// rule rightly rejected it. Only destinations the cards know count; none
+// known → no requirement. No schema with one → { noReferenceSchema }.
+// Part 2.2: `predicateRequirements` -- what the predicates of the rule's
+// steps require to exist (/dmodule[content/brex]/…, ancestor::dmodule[
+// descendant::commonRepository …]): the same shape as conditionRequirements
+// and the same use, but a preference: when no schema meets them, the choice
+// is what it was (never "not executable" for a relative path).
+export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, attributeSchemas = null, targets, conditionRequirements = [], predicateRequirements = [] }) {
+  const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
+  const meetsSets = (requirements, schema) =>
+    requirements.every((sets) =>
+      sets.some((names) => schemasHavingAll(names, cards, [schema], elementSchemas).length > 0)
+    );
+  const meetsConditions = (schema) => meetsSets(conditionRequirements, schema);
+  const referenceSets = (targets?.references || [])
+    .map((r) => ({ reference: r, names: [...new Set(r.destinations.map((d) => d.name))].filter(known) }))
+    .filter((r) => r.names.length > 0);
+  const meetsReferences = (schema) => referenceSets.every((r) => r.names.some((n) => schemasHavingAll([n], cards, [schema], elementSchemas).length > 0));
+  const knownPredicateRequirements = predicateRequirements
+    .map((sets) => sets.filter((names) => names.every(known)))
+    .filter((sets) => sets.length > 0);
+  const meetsPredicates = (schema) => meetsSets(knownPredicateRequirements, schema);
+  const required = [...new Set([...(targets?.checked || []), ...(targets?.absolutePrefixes || []).map((p) => p[0])])]
+    .filter(known);
+  const order = (list) => byPreference(list, documentSchemas);
+  const carriersOf = attributeOnlySchemas(attributeSchemas, documentSchemas);
+  const attributeOnly = (targets?.alternatives || []).map(carriersOf).filter(Boolean);
+  // "El atributo de la regla" (S1000D 3.0.1, //response/@rsptype): a rule
+  // whose last step is an attribute of an element (E/@a) is tested on a
+  // schema whose <E> has @a -- the cards say it per schema (variants, the
+  // SCHEMA FACTS' data). <response> is in comment (with @rsptype, in its
+  // status section) and in crew (without it): crew came first and the
+  // examples could only put @rsptype where it does not exist. A general
+  // rule only (a context rule keeps its schemas); DITA's cards merge the
+  // topic types, so nothing is narrowed there.
+  const ownedAttributes = contextSchemas.length === 0 && !elementSchemas
+    ? (targets?.alternatives || []).filter(
+        (a) =>
+          !a.opaque && a.attribute && a.steps.length > 0 && !a.descendantAttribute && a.checked
+          && (cards[a.checked]?.variants || []).length > 0
+          // a card without its attribute lists says nothing about them
+          && cards[a.checked].variants.every((v) => Array.isArray(v.attributes))
+      )
+    : [];
+  const carries = (a, schema) =>
+    cards[a.checked].variants.some(
+      (v) => (v.schemas || []).includes(schema) && (v.attributes_truncated || (v.attributes || []).some((x) => (x?.name ?? x) === a.attribute))
+    );
+  // An E/@a no schema has narrows nothing (the rest of the rule is tested
+  // as before: /dmodule/content//table/tgroup/@changeMark | …/title/@changeMark);
+  // only a rule with nothing else is "not executable", with the reason --
+  // never a schema where the attribute does not exist.
+  const possible = ownedAttributes.filter((a) => documentSchemas.some((schema) => carries(a, schema)));
+  const carriesAttributes = (schema) => possible.every((a) => carries(a, schema));
+  const fittingByElements = order(
+    schemasHavingAll(required, cards, documentSchemas, elementSchemas).filter(
+      (schema) => attributeOnly.every((schemas) => schemas.includes(schema)) && meetsConditions(schema)
+    )
+  );
+  const narrowed = fittingByElements.filter(carriesAttributes);
+  // No single schema has every such attribute: as before.
+  const fittingAll = narrowed.length > 0 ? narrowed : fittingByElements;
+  const testable = (targets?.alternatives || []).filter((a) => !a.opaque);
+  const unowned = ownedAttributes.find((a) => !possible.includes(a));
+  if (unowned && testable.every((a) => ownedAttributes.includes(a) && !possible.includes(a))) {
+    return { testSchema: null, otherSchema: null, groups: null, candidates: [], noAttributeSchema: { element: unowned.checked, attribute: unowned.attribute } };
+  }
+  const ownsAttribute = (alt, schema) => !possible.includes(alt) || carries(alt, schema);
+  const withReferences = contextSchemas.length === 0 && referenceSets.length > 0 ? fittingAll.filter(meetsReferences) : fittingAll;
+  if (contextSchemas.length === 0 && referenceSets.length > 0 && fittingAll.length > 0 && withReferences.length === 0) {
+    const r = referenceSets.find((x) => !fittingAll.some((s) => x.names.some((n) => schemasHavingAll([n], cards, [s], elementSchemas).length > 0))) || referenceSets[0];
+    return { testSchema: null, otherSchema: null, groups: null, candidates: [], noReferenceSchema: { element: r.reference.element, attribute: r.reference.attribute, destinations: r.names } };
+  }
+  // Part 2.2: the schemas that also have what the steps' predicates
+  // require come first; none → as before.
+  const withPredicates = contextSchemas.length === 0 && knownPredicateRequirements.length > 0 ? withReferences.filter(meetsPredicates) : [];
+  const fitting = withPredicates.length > 0 ? withPredicates : withReferences;
+  if (contextSchemas.length === 0 && conditionRequirements.length > 0 && fitting.length === 0) {
+    const unmet = conditionRequirements.find((sets) => !documentSchemas.some((s) => sets.some((names) => schemasHavingAll(names, cards, [s], elementSchemas).length > 0)));
+    return { testSchema: null, otherSchema: null, groups: null, candidates: [], noConditionSchema: unmet || conditionRequirements[0] };
+  }
+  if (contextSchemas.length > 0) {
+    const taken = new Set(contextSchemas);
+    const others = fitting.filter((s) => !taken.has(s));
+    const fallback = order(documentSchemas.filter((s) => !taken.has(s)));
+    return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null, groups: null };
+  }
+  const fallback = order(conditionRequirements.length ? fitting : documentSchemas);
+  const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas, carriersOf, ownsAttribute });
+  if (groups) return { testSchema: groups[0].schema, otherSchema: null, groups };
+  // Mejoras A, Part 1: a single schema must also have every element step of
+  // the rule's alternatives, not only the checked (last) one.
+  // //optionalPart/catalogSeqNumberRef (BRDP-S1-00223) got descript, which
+  // has <catalogSeqNumberRef> but no <optionalPart> -- "not executable: the
+  // examples cannot contain <optionalPart>"; now ipd. When no schema has
+  // them all (//dmStatus/applicRef | //pmStatus/applicRef: no schema has
+  // both status elements), the choice by the checked elements stays.
+  const allSteps = [
+    ...new Set([
+      ...required,
+      ...(targets?.alternatives || []).filter((a) => !a.opaque).flatMap((a) => a.steps),
+      // Part 1.2: the elements of a chain of ancestors too (legend/figure
+      // around <internalRef>: ddn has <internalRef> but no <legend>).
+      ...(targets?.chains || []).flatMap((c) => c.chain.map((step) => step.name)),
+    ]),
+  ].filter(known);
+  const fittingSteps = fitting.filter((schema) => schemasHavingAll(allSteps, cards, [schema], elementSchemas).length > 0);
+  // candidates: every schema the single test schema could be, in order (the
+  // relation split of prepareRuleTestSetup looks for another one there).
+  const candidates = fittingSteps.length ? fittingSteps : fitting;
+  return { testSchema: candidates[0] || fallback[0] || null, otherSchema: null, groups: null, candidates };
+}
+
+// The schemas that carry the attribute of an attribute-only alternative
+// (//@x, no element step, no absolute root), or null when the alternative
+// is not one, the attribute was not looked up, or no schema carries it.
+function attributeOnlySchemas(attributeSchemas, documentSchemas) {
+  return (alt) => {
+    if (!attributeSchemas || alt.opaque || !alt.attribute || alt.steps.length > 0 || alt.absolutePrefix) return null;
+    const schemas = (attributeSchemas[alt.attribute] || []).filter((s) => documentSchemas.includes(s));
+    return schemas.length > 0 ? schemas : null;
+  };
+}
+
+function schemaGroups(targets, common, { known, order, cards, documentSchemas, elementSchemas, carriersOf, ownsAttribute = () => true }) {
+  const bySchema = new Map();
+  for (const alt of targets?.alternatives || []) {
+    if (alt.opaque) continue;
+    const carriers = carriersOf(alt);
+    const names = [...new Set([...alt.steps, ...(alt.absolutePrefix ? [alt.absolutePrefix[0]] : [])])].filter(known);
+    if (names.length === 0 && !carriers) continue;
+    const preferred = order((carriers || schemasHavingAll(names, cards, documentSchemas, elementSchemas)).filter((schema) => ownsAttribute(alt, schema)))[0];
+    if (!preferred) continue;
+    if (!bySchema.has(preferred)) bySchema.set(preferred, []);
+    bySchema.get(preferred).push(alt);
+  }
+  if (bySchema.size < 2) return null;
+  if (common && bySchema.has(common)) return null;
+  return order([...bySchema.keys()]).map((schema) => {
+    const alternatives = bySchema.get(schema);
+    return { schema, alternatives, checked: [...new Set(alternatives.map((a) => a.checked).filter(Boolean))] };
+  });
+}
+
+// The rule's targets restricted to one group's alternatives: what the
+// examples of that group's schema are placed for.
+export function targetsForGroup(targets, group) {
+  const alternatives = group.alternatives;
+  return {
+    ...targets,
+    checked: [...new Set(alternatives.map((a) => a.checked).filter(Boolean))],
+    absolutePrefixes: alternatives.map((a) => a.absolutePrefix).filter(Boolean),
+    alternatives,
+  };
+}
+
+// ─── Where the content goes ─────────────────────────────────────────────────
+
+// The shortest chain of elements that puts `to` inside `from` in this
+// schema's graph -- [from, …, to] -- or null when there is none. At least
+// one step: "randomList//randomList" → randomList/listItem/para/randomList.
+export function nestingPath(elements, from, to, avoid = null) {
+  if (!elements[from] || !elements[to]) return null;
+  const previous = new Map();
+  let frontier = [from];
+  // `from` is never re-entered (a cycle back to it would make the chain
+  // loop forever); from === to still works, the check is on the child.
+  const seen = new Set([from]);
+  while (frontier.length) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of [...(elements[name]?.children || [])].sort()) {
+        if (child === to) {
+          const path = [to, name];
+          for (let at = name; previous.has(at); ) {
+            at = previous.get(at);
+            path.push(at);
+          }
+          return path.reverse();
+        }
+        if (!seen.has(child) && elements[child] && !avoid?.has(child)) {
+          seen.add(child);
+          previous.set(child, name);
+          next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+// Pending of the test rule (Part 1): for each "A//B" of the rule whose B is
+// not a direct child of A, the valid nesting in this schema. An LLM put a
+// <randomList> straight inside another one (invalid) and, corrected, moved
+// it out -- the reject example was no longer nested. Nothing for a pair
+// with no path in the schema.
+function nestingPaths(structure, targets) {
+  const elements = structure.elements;
+  const out = [];
+  const seen = new Set();
+  for (const alternative of targets?.alternatives || []) {
+    if (alternative.opaque) continue;
+    for (const [ancestor, descendant] of alternative.descendantPairs || []) {
+      const key = `${ancestor}//${descendant}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const path = nestingPath(elements, ancestor, descendant);
+      if (path && path.length > 2) out.push({ ancestor, descendant, path });
+    }
+  }
+  return out;
+}
+
+// Ajustes tras la pasada real de las plantillas, Part 3: the elements a
+// rule checks can sit several levels below the insertion point -- in a
+// data update file, update/insertObjectGroup/insertObject/partSpec. The
+// prompt only listed what goes DIRECTLY inside <update>, so the LLM
+// guessed the rest (0 of 3 valid examples for EXT-00019 in the real run).
+// contentRoutes gives, from the schema's graph, the valid way down to each
+// of them: the containers on the way with the children that lead there
+// (and their own attributes), and a short card of the elements themselves.
+// Only when at least one element the rule checks is not a direct child of
+// the insertion point; otherwise null (the prompt does not change).
+// `names`: the rule's content-side names (checked + predicates) first,
+// then `extraNames` (elements its objectUse names, e.g. the ones a tool CIR
+// may contain), which join the route but never trigger it.
+const ROUTE_MAX_NAMES = 30;
+const ROUTE_MAX_CARDS = 6;
+const ROUTE_MAX_LIST = 12;
+// Attributes every S1000D element has (change marking, security,
+// applicability links): noise in a route, left out of it.
+const GENERIC_ATTRIBUTES = new Set([
+  'authorityDocument', 'authorityName', 'caveat', 'changeMark', 'changeType', 'commercialClassification',
+  'securityClassification', 'reasonForUpdateRefIds', 'id', 'applicRefId', 'derivativeClassificationRefId',
+  'controlAuthorityRefIds', 'crewRefCard', 'skillLevelCode',
+]);
+const specificAttributes = (el) =>
+  (el?.attributes || []).filter((a) => !GENERIC_ATTRIBUTES.has(a) && !a.includes(':')).sort();
+
+// ruleAttributes: the attributes an attribute-only part of the rule checks
+// (//@systemDiffCode). They go first in each card's attribute list, so the
+// list's cut (ROUTE_MAX_LIST) never hides the very attribute the examples
+// must use (<dmCode> has 13 specific attributes; @systemDiffCode was the
+// 13th).
+export function contentRoutes(structure, insertion, ruleNames, extraNames = [], ruleAttributes = []) {
+  const elements = structure.elements;
+  if (!insertion || !elements[insertion]) return null;
+  const direct = new Set(elements[insertion].children || []);
+  const pathOf = (name) => (name === insertion || direct.has(name) ? null : nestingPath(elements, insertion, name));
+  const ruleRoutes = [...new Set(ruleNames)].filter((n) => elements[n]).map((n) => [n, pathOf(n)]);
+  if (!ruleRoutes.some(([, path]) => path)) return null;
+  const all = [...ruleRoutes];
+  for (const n of new Set(extraNames)) {
+    if (elements[n] && !all.some(([m]) => m === n)) all.push([n, pathOf(n)]);
+  }
+  const routed = all.filter(([, path]) => path).slice(0, ROUTE_MAX_NAMES);
+  const edges = new Map();
+  for (const [, path] of routed) {
+    for (let i = 0; i + 1 < path.length; i += 1) {
+      if (!edges.has(path[i])) edges.set(path[i], new Set());
+      edges.get(path[i]).add(path[i + 1]);
+    }
+  }
+  const targetSet = new Set(routed.map(([n]) => n));
+  const steps = [...edges.entries()].map(([parent, children]) => ({
+    parent,
+    children: [...children].sort(),
+    attributes: targetSet.has(parent) ? [] : specificAttributes(elements[parent]),
+  }));
+  // Cards: half from the rule's own names (what a reject example needs),
+  // half from the others (what an accept example may use instead).
+  const ruleRouted = routed.filter(([n]) => ruleRoutes.some(([m]) => m === n));
+  const otherRouted = routed.filter(([n]) => !ruleRoutes.some(([m]) => m === n));
+  const half = Math.ceil(ROUTE_MAX_CARDS / 2);
+  const carded = [
+    ...ruleRouted.slice(0, otherRouted.length ? half : ROUTE_MAX_CARDS),
+    ...otherRouted.slice(0, ROUTE_MAX_CARDS),
+  ].slice(0, ROUTE_MAX_CARDS);
+  const first = (list) => [...list.filter((a) => ruleAttributes.includes(a)), ...list.filter((a) => !ruleAttributes.includes(a))];
+  const cards = carded.map(([name]) => {
+    const children = [...(elements[name].children || [])].sort();
+    const attributes = first(specificAttributes(elements[name]));
+    return {
+      name,
+      // each child with its own attributes: <partSpec> > partIdent(@partNumberValue …)
+      children: children.slice(0, ROUTE_MAX_LIST).map((c) => ({ name: c, attributes: first(specificAttributes(elements[c])).slice(0, 6) })),
+      childrenOmitted: Math.max(0, children.length - ROUTE_MAX_LIST),
+      attributes: attributes.slice(0, ROUTE_MAX_LIST),
+      attributesOmitted: Math.max(0, attributes.length - ROUTE_MAX_LIST),
+    };
+  });
+  return { from: insertion, steps, cards };
+}
+
+// The element names the rule's objectUse / objuse text mentions (bare
+// words: "Only toolSpec, toolIdent, figure … can be used"); the caller
+// keeps those that are elements of the schema.
+export function ruleUseNames(ruleXml) {
+  const out = [];
+  for (const m of String(ruleXml || '').matchAll(/<(objectUse|objuse)\b[^>]*>([\s\S]*?)<\/\1>/g)) {
+    for (const w of m[2].replace(/&lt;|&gt;|&amp;/g, ' ').matchAll(/[A-Za-z][A-Za-z0-9-]*/g)) out.push(w[0]);
+  }
+  return [...new Set(out)];
+}
+
+function reachable(elements, from, target, maxDepth = 8) {
+  const seen = new Set([from]);
+  let frontier = [from];
+  for (let depth = 0; depth < maxDepth && frontier.length; depth += 1) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of elements[name]?.children || []) {
+        if (child === target) return true;
+        if (!seen.has(child) && elements[child]) {
+          seen.add(child);
+          next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return false;
+}
+
+// All the elements reachable from `starts` (the starts included).
+function reachableSet(elements, starts) {
+  const seen = new Set(starts.filter((n) => elements[n]));
+  let frontier = [...seen];
+  while (frontier.length) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of elements[name]?.children || []) {
+        if (!seen.has(child) && elements[child]) {
+          seen.add(child);
+          next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+}
+
+// ─── not(ancestor::X), ancestor::X on the checked step (Mejoras A, Part 2) ──
+
+// Splits on `sep` outside parentheses, predicates and string literals.
+function splitOutside(text, sep) {
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth -= 1;
+    else if (depth === 0 && text.startsWith(sep, i)) {
+      parts.push(current);
+      current = '';
+      i += sep.length - 1;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+// The top-level predicates of a step ("commonInfo[a][b]" → ["a", "b"]).
+function stepPredicates(step) {
+  const out = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (const ch of step) {
+    if (quote) {
+      if (depth > 0) current += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      if (depth > 0) current += ch;
+      continue;
+    }
+    if (ch === '[') {
+      if (depth > 0) current += ch;
+      depth += 1;
+    } else if (ch === ']') {
+      depth -= 1;
+      if (depth > 0) current += ch;
+      else {
+        out.push(current);
+        current = '';
+      }
+    } else if (depth > 0) current += ch;
+  }
+  return out;
+}
+
+
+// A predicate of the LAST step of an alternative that says whether the
+// checked element is inside another one: //commonInfo[not(ancestor::procedure)]
+// (BRDP-S1-00177), //x[ancestor::y], //x[not(parent::y)], //x[parent::y].
+// → [{ element, axis: 'ancestor' | 'parent', ancestor, negated }]. Only a
+// predicate that is that test alone; a step with "*", a prefix or an
+// attribute is not an element step, so it gives nothing. A BREX path that is
+// a true/false condition gives nothing either.
+export function ancestorRelations(ruleXml) {
+  const out = [];
+  const seen = new Set();
+  const contexts = schematronContexts(ruleXml);
+  for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
+    if (!contexts.length && conditionOperands(stripPredicates(expression)).length !== 1) continue;
+    for (const alternative of splitOutside(expression, '|')) {
+      const steps = splitOutside(alternative.trim(), '/').filter((s) => s.trim());
+      const last = steps[steps.length - 1];
+      if (!last) continue;
+      const name = stepName(last.replace(/\[[\s\S]*$/, ''));
+      if (!name) continue;
+      // Colocación, Part 1: also tests joined by and/or in one predicate.
+      for (const term of stepPredicates(last).flatMap((predicate) => relationTerms(predicate))) {
+        const relation = { element: name, axis: term.axis, ancestor: term.ancestor, negated: term.negated };
+        const key = JSON.stringify(relation);
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(relation);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+const childrenOf = (elements, name) => elements[name]?.children || [];
+
+// Every element reachable from `starts` without going through `blocked`
+// (which can itself be reached, but is never expanded).
+function reachableAvoiding(elements, starts, blocked) {
+  const seen = new Set(starts.filter((n) => elements[n]));
+  let frontier = [...seen].filter((n) => n !== blocked);
+  while (frontier.length) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of childrenOf(elements, name)) {
+        if (!seen.has(child) && elements[child]) {
+          seen.add(child);
+          if (child !== blocked) next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+}
+
+// Which of the two examples a schema allows for a relation: { inside: the
+// checked element with the other one above it (parent: directly above),
+// outside: without it }. From the document's root, over the graph without
+// the skeleton's identification and status section (skeleton.metadata):
+// the examples' content never goes there, so a case only that section
+// allows (S1000D 3.0.1 descript: a <seqlist> outside <descript> only at
+// idstatus/…/copyright/para) does not count -- it is listed in
+// `metadataOnly` ('inside' / 'outside'), and the key is there only then.
+export function relationCases(structure, relation) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const section = structure.skeleton.metadata?.element || null;
+  const whole = relationCasesIn(elements, root, relation);
+  if (!section || section === root || !elements[section]) return whole;
+  const content = { ...elements };
+  delete content[section];
+  const cases = relationCasesIn(content, root, relation);
+  const metadataOnly = ['inside', 'outside'].filter((side) => whole[side] && !cases[side]);
+  return metadataOnly.length ? { ...cases, metadataOnly } : cases;
+}
+
+function relationCasesIn(elements, root, relation) {
+  const { element, ancestor, axis } = relation;
+  const all = reachableSet(elements, [root]);
+  if (!all.has(element)) return { inside: false, outside: false };
+  if (axis === 'parent') {
+    const parents = [...all].filter((n) => childrenOf(elements, n).includes(element));
+    return { inside: parents.includes(ancestor), outside: parents.some((n) => n !== ancestor) };
+  }
+  const underAncestor = all.has(ancestor) ? reachableSet(elements, childrenOf(elements, ancestor)) : new Set();
+  return {
+    inside: underAncestor.has(element),
+    outside: root !== ancestor && reachableAvoiding(elements, [root], ancestor).has(element),
+  };
+}
+
+// Can the content, put at chain[i] (with `above` the chain down to it), hold
+// the checked element inside / outside the other one?
+function relationAllowsAt(elements, above, from, relation, inside) {
+  const { element, ancestor, axis } = relation;
+  if (axis === 'parent') {
+    const parents = [...reachableSet(elements, [from])].filter((n) => childrenOf(elements, n).includes(element));
+    return inside ? parents.includes(ancestor) : parents.some((n) => n !== ancestor);
+  }
+  const ancestorAbove = above.includes(ancestor);
+  if (!inside) return !ancestorAbove && reachableAvoiding(elements, [from], ancestor).has(element) && from !== ancestor;
+  if (ancestorAbove) return reachableSet(elements, childrenOf(elements, from)).has(element);
+  return reachableSet(elements, childrenOf(elements, from)).has(ancestor)
+    && reachableSet(elements, childrenOf(elements, ancestor)).has(element);
+}
+
+// The shortest way from `from` down to the checked element, inside or
+// outside the other one -- [from, …, element] -- or null.
+function relationWay(elements, above, from, relation, inside) {
+  const { element, ancestor, axis } = relation;
+  const startSeen = axis === 'ancestor' && above.includes(ancestor);
+  const key = (name, seen) => `${name}|${seen}`;
+  const previous = new Map();
+  const start = key(from, startSeen);
+  const visited = new Set([start]);
+  let frontier = [[from, startSeen]];
+  while (frontier.length) {
+    const next = [];
+    for (const [name, seenAncestor] of frontier) {
+      for (const child of [...childrenOf(elements, name)].sort()) {
+        if (!elements[child]) continue;
+        if (child === element) {
+          const ok =
+            axis === 'parent'
+              ? inside === (name === ancestor)
+              : inside === (seenAncestor || name === ancestor);
+          if (ok) {
+            const way = [child];
+            for (let at = key(name, seenAncestor); at; at = previous.get(at)) way.push(at.split('|')[0]);
+            return way.reverse();
+          }
+        }
+        if (axis === 'ancestor' && !inside && child === ancestor) continue;
+        const seen = axis === 'ancestor' ? seenAncestor || child === ancestor : false;
+        const k = key(child, seen);
+        if (!visited.has(k)) {
+          visited.add(k);
+          previous.set(k, key(name, seenAncestor));
+          next.push([child, seen]);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+function treeNames(node, out = new Set()) {
+  out.add(node.name);
+  for (const child of node.children || []) treeNames(child, out);
+  return out;
+}
+
+// Rule test on DM metadata: which part of the assembled data module each
+// alternative of the rule's paths can select nodes in.
+//   M  elements reachable from the identification and status section
+//   T  elements of the minimal section the application writes
+//   C  elements reachable from the rest of the document (its content)
+// An alternative looks at the METADATA when all its element steps are in M
+// and its last element is in T (so the skeleton's own node is checked: the
+// dmCode of //dmCode/@infoCode) or one of its steps exists only there
+// (dmIdent, dmStatus); an attribute-only alternative (//@issueType), when an
+// element that carries the attribute is. It looks at the CONTENT when all
+// its element steps are in C (an attribute-only one: when an element in C
+// carries the attribute). An absolute path says where it goes by its second
+// step. An alternative that can be neither is unreachable; an opaque one
+// (steps that cannot be read) counts as content, as before. The element
+// names in the predicates (targets.predicateNames) add the part they belong
+// to: a predicate on dmStatus/@issueType puts the section in the LLM's hands
+// even when the path selects content nodes.
+// → { metadata, content, contentAlternatives, metadataAlternatives,
+//     unreachable, sectionMissing }
+// -- unreachable: the names the rule looks at when EVERY alternative is
+// unreachable (the examples can never contain what it checks), else null.
+// sectionMissing: a document whose identification and status section the
+// application does not build yet (comment, …: skeleton.metadata is null,
+// but its root has one of STATUS_SECTION_NAMES) -- { element, names, all }
+// for the alternatives that can only look inside that section (never
+// written into the content: Mistral put <pmStatus> inside <content> before
+// the pm had one); all: every alternative is like that. Else null.
+function classifyRuleTargets(structure, targets) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const section = structure.skeleton.metadata || null;
+  const missing = section ? null : missingSection(structure);
+  // The root is an ancestor of both parts (an absolute path names it).
+  const M = section ? reachableSet(elements, [section.element]).add(root) : new Set();
+  const T = section ? treeNames(section.tree) : new Set();
+  const C = reachableSet(elements, section ? (elements[root]?.children || []).filter((c) => c !== section.element) : [root]).add(root);
+  const owners = (attribute) => Object.keys(elements).filter((n) => elements[n].attributes.includes(attribute));
+  let metadata = false;
+  let content = false;
+  const contentAlternatives = [];
+  const metadataAlternatives = [];
+  const unreachableNames = [];
+  let allUnreachable = true;
+  let wrongRoot = false;
+  const alternatives = targets?.alternatives || [];
+  const missingNames = [];
+  let allMissing = alternatives.length > 0;
+  for (const alt of alternatives) {
+    // An absolute path that starts at another root never reaches this
+    // document's section either (GMC, Part 2.3: unreachable, with the root).
+    const otherRoot = alt.absolutePrefix && alt.absolutePrefix[0] !== root;
+    const needs = missing && !otherRoot ? sectionOnlyNames(alt, missing, elements) : null;
+    if (needs) {
+      missingNames.push(...needs);
+      continue;
+    }
+    allMissing = false;
+    // GMC, Part 2.2: a prefixed element step the structure does not have.
+    const foreign = (alt.prefixedSteps || []).filter((n) => !elements[n]);
+    if (foreign.length > 0) {
+      unreachableNames.push(...foreign.map((n) => `<${n}>`));
+      continue;
+    }
+    if (alt.opaque) {
+      content = true;
+      contentAlternatives.push(alt);
+      allUnreachable = false;
+      continue;
+    }
+    let inMeta;
+    let inContent;
+    const prefix = alt.absolutePrefix;
+    if (prefix && prefix[0] !== root) {
+      inMeta = false;
+      inContent = false;
+    } else if (alt.steps.length > 0) {
+      const last = alt.steps[alt.steps.length - 1];
+      const metaOnly = alt.steps.some((s) => M.has(s) && !C.has(s));
+      inMeta = Boolean(section) && alt.steps.every((s) => M.has(s)) && (T.has(last) || metaOnly);
+      inContent = alt.steps.every((s) => C.has(s));
+      if (prefix && prefix.length > 1 && section) {
+        inMeta = inMeta && prefix[1] === section.element;
+        inContent = inContent && prefix[1] !== section.element;
+      }
+    } else {
+      const carriers = owners(alt.attribute);
+      inMeta = Boolean(section) && carriers.some((o) => T.has(o) || (M.has(o) && !C.has(o)));
+      inContent = carriers.some((o) => C.has(o));
+    }
+    if (inMeta) {
+      metadata = true;
+      metadataAlternatives.push(alt);
+    }
+    if (inContent) {
+      content = true;
+      contentAlternatives.push(alt);
+    }
+    if (inMeta || inContent) {
+      allUnreachable = false;
+      continue;
+    }
+    const unknown = alt.steps.find((s) => !M.has(s) && !C.has(s));
+    // GMC, Part 2.3: what is missing is the first step of an absolute path,
+    // and this document has another root (/dmodule… in a comment).
+    if (prefix && prefix[0] !== root && unknown === prefix[0]) wrongRoot = true;
+    unreachableNames.push(
+      unknown ? `<${unknown}>` : alt.steps.length > 0 ? alt.steps.map((s) => `<${s}>`).join('/') : `@${alt.attribute}`
+    );
+  }
+  if (alternatives.length === 0) content = true;
+  const sectionMissing = missingNames.length
+    ? { element: missing.element, names: [...new Set(missingNames)], all: allMissing }
+    : null;
+  if (sectionMissing?.all) {
+    return { metadata: false, content: false, contentAlternatives: [], metadataAlternatives: [], unreachable: null, sectionMissing, rootMismatch: null };
+  }
+  // Part 1.3: a loose attribute in a predicate (/dmodule//@reasonForUpdateRefIds,
+  // BRDP-EXT-00181) whose carriers include content elements -- the example
+  // can write content too (an element that references the reasonForUpdate).
+  // It counts like an attribute-only alternative (//@x, Mejoras A): an
+  // alternative of its own, with no element step. Carried only in the
+  // section: nothing changes.
+  const looseAlternatives = [];
+  for (const loose of targets?.looseAttributes || []) {
+    if (loose.root && loose.root !== root) continue;
+    if (alternatives.some((a) => !a.opaque && a.attribute === loose.attribute && a.steps.length === 0)) continue;
+    const carriers = owners(loose.attribute).filter((o) => o !== root && C.has(o) && !(section && T.has(o)));
+    if (carriers.length === 0) continue;
+    const alt = { steps: [], attribute: loose.attribute, checked: null, absolutePrefix: null, opaque: false, descendantPairs: [], prefixedSteps: [], descendantAttribute: false, loose: true };
+    looseAlternatives.push(alt);
+    contentAlternatives.push(alt);
+    content = true;
+    allUnreachable = false;
+  }
+  // A predicate that reads the other part: an element only the section has
+  // (dmStatus, updateCode, …) makes the LLM write the section too; an
+  // element only the content has (zoneSpec, …), the content.
+  const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
+  if (section && predicateNames.some((n) => M.has(n) && !C.has(n))) metadata = true;
+  const predicateContent = predicateNames.some((n) => C.has(n) && !M.has(n));
+  if (predicateContent) content = true;
+  const unreachable =
+    alternatives.length > 0 && allUnreachable && !metadata && !content ? [...new Set(unreachableNames)] : null;
+  // A rule nothing can be said about keeps the content placement.
+  if (!metadata && !content && !unreachable) content = true;
+  // rootMismatch: this document's root, when an unreachable alternative
+  // starts at another one (only said with the unreachable names).
+  return { metadata, content, contentAlternatives, metadataAlternatives, unreachable, sectionMissing, rootMismatch: unreachable && wrongRoot ? root : null, predicateContent, looseAlternatives };
+}
+
+// The identification and status section of a document the application does
+// not build it for: { element, M: reachable from it, C: reachable from the
+// rest of the document (the root included) }, or null.
+const STATUS_SECTION_NAMES = ['identAndStatusSection', 'idstatus', 'updateIdentAndStatusSection', 'imfIdentAndStatusSection', 'cstatus'];
+function missingSection(structure) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const element = STATUS_SECTION_NAMES.find((n) => (elements[root]?.children || []).includes(n));
+  if (!element) return null;
+  return {
+    element,
+    M: reachableSet(elements, [element]),
+    C: reachableSet(elements, (elements[root]?.children || []).filter((c) => c !== element)).add(root),
+  };
+}
+
+// The names by which an alternative can only look inside that section (a
+// step, or an attribute's every carrier, that the rest of the document does
+// not have), or null.
+function sectionOnlyNames(alt, missing, elements) {
+  if (alt.opaque) return null;
+  if (alt.steps.length > 0) {
+    const only = alt.steps.filter((s) => missing.M.has(s) && !missing.C.has(s));
+    return only.length ? only.map((s) => `<${s}>`) : null;
+  }
+  const carriers = Object.keys(elements).filter((n) => elements[n].attributes.includes(alt.attribute));
+  return carriers.length && carriers.every((o) => missing.M.has(o) && !missing.C.has(o)) ? [`@${alt.attribute}`] : null;
+}
+
+function isRootOnly(targets, root) {
+  const alternatives = targets?.alternatives || [];
+  return (
+    alternatives.length > 0 &&
+    !(targets.wholeDocument) &&
+    !(targets.rootPredicates || []).includes(root) &&
+    alternatives.every(
+      (a) => !a.opaque && !a.attribute && a.steps.length === 1 && a.steps[0] === root && a.absolutePrefix?.length === 1
+    )
+  );
+}
+
+// Ruta del esquema, Part 1: the way from the minimal identification and
+// status section down to the elements the rule looks at there, when they
+// are not directly inside one of its elements (schemaPlacement.js,
+// sectionRoutes) -- BRDP-S1-00065, //copyright: both examples put
+// <copyright> straight in <dmStatus> and the correction fixed none.
+// Caminos de la sección, Part 1: the route goes to the LAST element step of
+// each alternative and follows the rule's steps after the last one the
+// minimal section already has (or that sits above it: the document's root),
+// each with its axis ("/" the very next element, "//" anywhere below) --
+// EXT-00188, //dmodule/identAndStatusSection/dmStatus//para/captionGroup:
+// only ways …/para/captionGroup. Its earlier steps get no way of their own
+// (the final one passes through them); they do when the final one needs
+// none (it is in the section, or directly inside one of its elements).
+// The predicates' names only the section has follow. [] when every one is
+// already there or directly inside: the prompt does not change.
+export function sectionRequirements(alt, inTree, above) {
+  const steps = alt.steps || [];
+  let last = -1;
+  steps.forEach((step, i) => {
+    if (inTree.has(step) || above.has(step)) last = i;
+  });
+  const tail = steps.slice(last + 1);
+  if (tail.length === 0) return null;
+  const axes = alt.axes || [];
+  return {
+    after: last >= 0 ? steps[last] : null,
+    segments: tail.map((name, j) => ({ name, axis: axes[last + 1 + j] || 'descendant' })),
+  };
+}
+
+function metadataRoutes(structure, targets, alternatives) {
+  const section = structure.skeleton.metadata;
+  const elements = structure.elements;
+  const inTree = new Set();
+  const collect = (node) => {
+    if (!node?.name) return;
+    inTree.add(node.name);
+    (node.children || []).forEach(collect);
+  };
+  collect(section.tree);
+  const above = new Set((structure.skeleton.path || []).slice(0, 1));
+  const finals = [];
+  const requirements = {};
+  const earlier = [];
+  for (const alt of alternatives || []) {
+    if (alt.opaque || alt.steps.length === 0) continue;
+    const final = alt.steps[alt.steps.length - 1];
+    finals.push(final);
+    const req = sectionRequirements(alt, inTree, above);
+    if (req && !requirements[final]) requirements[final] = req;
+    alt.steps.slice(0, -1).forEach((step, i) => {
+      earlier.push(step);
+      if (!requirements[step]) {
+        const prefix = sectionRequirements({ steps: alt.steps.slice(0, i + 1), axes: (alt.axes || []).slice(0, i + 1) }, inTree, above);
+        if (prefix) requirements[step] = prefix;
+      }
+    });
+  }
+  const finalRoutes = sectionRoutes(structure, section, finals, requirements);
+  const routed = new Set(finalRoutes.map((r) => r.target));
+  // An earlier step only when no alternative through it got a way.
+  const pending = [];
+  for (const alt of alternatives || []) {
+    if (alt.opaque || alt.steps.length === 0 || routed.has(alt.steps[alt.steps.length - 1])) continue;
+    pending.push(...alt.steps.slice(0, -1));
+  }
+  const stepRoutes = [...finalRoutes, ...sectionRoutes(structure, section, pending.filter((n) => !finals.includes(n)), requirements)];
+  const names = [...finals, ...earlier];
+  // A predicate's name only adds a way when none of the steps' ways already
+  // reaches it (//copyright[… copyrightPara …]: the way to <copyright>, whose
+  // minimum already has its <copyrightPara>).
+  const inSection = reachableSet(elements, [section.element]);
+  const rest = reachableSet(elements, (elements[structure.skeleton.path[0]]?.children || []).filter((c) => c !== section.element));
+  const predicates = (targets?.predicateNames || []).filter((n) => inSection.has(n) && !rest.has(n) && !names.includes(n));
+  const covered = (route) =>
+    stepRoutes.some((r) => route.paths.every((p) => r.paths.some((q) => p.join('/').startsWith(`${q.join('/')}/`))));
+  const predicateRoutes = sectionRoutes(structure, section, predicates).filter((r) => !covered(r));
+  return [...stepRoutes, ...predicateRoutes];
+}
+
+function wholeDocumentMetadata(structure, targets, section) {
+  const metadata = { element: section.element, tree: section.tree, insertion: true };
+  const routes = metadataRoutes(structure, targets, (targets?.alternatives || []).filter((a) => !a.opaque));
+  if (routes.length) metadata.routes = routes;
+  return metadata;
+}
+
+// ─── Attributes the rule checks: where they go (GMC, Part 1) ─────────────────
+
+// How many carriers of an attribute the prompt lists by name.
+export const CARRIER_LIST_MAX = 20;
+
+// The elements of this schema that carry the attribute an alternative ends
+// on: //@a, every carrier; X//@a (Part 1.4), only those below X -- never X
+// itself; X/@a, X when it carries it.
+function alternativeCarriers(elements, alt) {
+  const carries = (n) => (elements[n]?.attributes || []).includes(alt.attribute);
+  if (alt.steps.length === 0) return Object.keys(elements).filter(carries).sort();
+  const last = alt.steps[alt.steps.length - 1];
+  if (alt.descendantAttribute) return [...reachableSet(elements, elements[last]?.children || [])].filter(carries).sort();
+  return carries(last) ? [last] : [];
+}
+
+// Part 1.3: //@a whose only carrier here is the document's root (or the root
+// of an identification and status section the application writes) -- the
+// LLM never writes those elements, so the example gives the values in
+// "rootAttributes" and the application puts them there (assembleExample).
+// → [{ attribute, element, alternatives }]
+function rootAttributeTargets(structure, targets, section, sectionWritten) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const holders = new Set([root, ...(section && !sectionWritten ? [section.element] : [])]);
+  const out = [];
+  for (const alt of targets?.alternatives || []) {
+    if (alt.opaque || !alt.attribute || alt.steps.length > 0 || alt.absolutePrefix) continue;
+    const carriers = alternativeCarriers(elements, alt);
+    if (carriers.length === 0 || !carriers.every((c) => holders.has(c))) continue;
+    const element = carriers.includes(root) ? root : carriers[0];
+    const known = out.find((r) => r.attribute === alt.attribute && r.element === element);
+    if (known) known.alternatives.push(alt);
+    else out.push({ attribute: alt.attribute, element, alternatives: [alt] });
+  }
+  return out;
+}
+
+// Breadth-first distance of every element below `from` (its children at 1).
+function distancesFrom(elements, from) {
+  const dist = new Map();
+  let frontier = [from];
+  for (let depth = 1; frontier.length; depth += 1) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of elements[name]?.children || []) {
+        if (dist.has(child) || !elements[child]) continue;
+        dist.set(child, depth);
+        next.push(child);
+      }
+    }
+    frontier = next;
+  }
+  return dist;
+}
+
+// Part 1.2: for each attribute the rule's alternatives end on (other than the
+// root ones), the elements of this schema that carry it -- nearest first
+// from where the LLM writes (the insertion point, or the identification and
+// status section when it writes that) -- and the valid way to the nearest.
+// `inPrompt`: an attribute-only alternative (//@a) or X//@a; the prompt lists
+// those (X/@a names its element already), the correction round all of them.
+// → [{ attribute, total, names, inPrompt, nearest: { name, from: 'content',
+//      way } | { name, from: 'section', way, inMinimal, position, minimal,
+//      several, paths } | null }]
+function attributeCarrierInfos(structure, placed, alternatives) {
+  const elements = structure.elements;
+  const byAttribute = new Map();
+  for (const alt of alternatives) {
+    if (alt.opaque || !alt.attribute) continue;
+    const info = byAttribute.get(alt.attribute) || { attribute: alt.attribute, carriers: new Set(), inPrompt: false, alternatives: [] };
+    for (const c of alternativeCarriers(elements, alt)) info.carriers.add(c);
+    info.inPrompt = info.inPrompt || alt.steps.length === 0 || alt.descendantAttribute;
+    info.alternatives.push(alt);
+    byAttribute.set(alt.attribute, info);
+  }
+  const content = placed.contentInsertion !== false && placed.insertion ? placed.insertion : null;
+  const section = placed.metadata?.insertion ? placed.metadata : null;
+  const contentDist = content ? distancesFrom(elements, content) : new Map();
+  const sectionDist = section ? distancesFrom(elements, section.element) : new Map();
+  const skeleton = new Set(placed.path || []);
+  const out = [];
+  for (const info of byAttribute.values()) {
+    const carriers = [...info.carriers];
+    if (carriers.length === 0) continue;
+    const cd = (c) => (content && !skeleton.has(c) ? contentDist.get(c) : undefined);
+    const sd = (c) => (section ? sectionDist.get(c) : undefined);
+    const best = (c) => Math.min(cd(c) ?? Infinity, sd(c) ?? Infinity);
+    const names = carriers.sort((a, b) => best(a) - best(b) || a.localeCompare(b));
+    let nearest = null;
+    for (const name of names) {
+      if (best(name) === Infinity) break;
+      if (cd(name) !== undefined && cd(name) <= (sd(name) ?? Infinity)) {
+        const alt = info.alternatives.find((a) => a.descendantAttribute);
+        let way = null;
+        if (alt) {
+          const placedSteps = alt.steps.filter((n) => !skeleton.has(n));
+          way = writePathOf(elements, content, [...placedSteps, name]);
+        }
+        way = way || nestingPath(elements, content, name);
+        if (way) {
+          nearest = { name, from: 'content', way };
+          break;
+        }
+      }
+      const w = section ? sectionCarrierWay(structure, section, name) : null;
+      if (w) {
+        nearest = { name, from: 'section', way: w.path, inMinimal: w.inMinimal, position: w.position, minimal: w.minimal, several: w.several, paths: w.paths || null };
+        break;
+      }
+    }
+    out.push({ attribute: info.attribute, total: names.length, names, inPrompt: info.inPrompt, nearest });
+  }
+  return out;
+}
+
+// The English lines of one attribute's carriers (the prompt indents them;
+// the correction round joins them): "@x goes on: <a>, <b>, <c> (N)", then
+// the way to the nearest.
+export function attributeCarrierLines(info, { withMinimal = false } = {}) {
+  const shown = info.names.slice(0, CARRIER_LIST_MAX).map((n) => `<${n}>`).join(', ');
+  const more = info.total > CARRIER_LIST_MAX ? `, +${info.total - CARRIER_LIST_MAX} more` : '';
+  const lines = [`@${info.attribute} goes on: ${shown}${more} (${info.total}).`];
+  const n = info.nearest;
+  if (n?.from === 'content') {
+    lines.push(`The valid way to the nearest, <${n.name}>, from <${n.way[0]}>: ${n.way.join('/')}.`);
+  } else if (n?.from === 'section') {
+    if (n.inMinimal) {
+      lines.push(`The nearest, <${n.name}>, is already in the minimal identification and status section: ${n.way.join('/')}.`);
+    } else if (n.several && n.paths?.length > 1) {
+      lines.push(`The valid ways to the nearest, <${n.name}>, from the identification and status section (use one): ${n.paths.map((p) => p.join('/')).join('; ')}.`);
+    } else {
+      const pos = n.position;
+      const where = !pos ? '' : pos.after ? `, right after <${pos.after}>` : pos.before ? `, right before <${pos.before}>` : ', as its first child';
+      const goes = pos ? ` <${pos.container}> goes inside <${pos.parent}>${where}` : '';
+      lines.push(`The valid way to the nearest, <${n.name}>, from the identification and status section: ${n.way.join('/')}.${goes}${goes ? '.' : ''}`);
+      if (withMinimal && n.minimal && n.minimal.trim() !== `<${n.name}/>`) lines.push(`A minimum valid one, with its required children ("…" is text you write):\n${n.minimal}`);
+    }
+  }
+  return lines;
+}
+
+// { path, insertion, root, allowedChildren, titled, metadata,
+//   contentInsertion, unreachable } for one schema's structure (GET
+// /api/schema-cards/structure) and the rule's targets. A whole-document
+// example (the rule checks the root element) has an empty path and no
+// insertion point: the content is the complete root element.
+// titled (T4b): the elements of the path the application writes a <title>
+// into (a DITA topic's mandatory title, skeleton.titled) -- none when the
+// rule itself checks <title>, so a skeleton title never decides a verdict;
+// for a whole document, the root when the LLM has to write that title.
+// metadata (rule test on DM metadata): { element, tree, insertion } for a
+// data module -- the minimal identification and status section, which the
+// application writes (insertion: false) unless the rule looks at it
+// (insertion: true: the LLM writes the whole section, starting from the
+// minimal one); null for other documents. contentInsertion: false when the
+// rule looks only at the metadata (the content is the bare skeleton).
+// unreachable: see classifyRuleTargets.
+// withRoutes (Part 3): give the valid way down to the checked elements
+// (contentRoutes) -- asked by prepareRuleTestSetup for the S1000D schemas
+// with no path to <para> (data update file, ipd, pm, dml…: structured data
+// an LLM does not know by heart), never for prose (a <para> or a DITA body).
+// How many carriers of an attribute-only alternative get a way down in
+// the prompt (the nearest ones from the insertion point).
+const ATTRIBUTE_CARRIER_ROUTES = 3;
+
+export function placeExample(structure, targets, { useNames = [], withRoutes = false, relation = null } = {}) {
+  const chain = structure.skeleton.path;
+  const elements = structure.elements;
+  const section = structure.skeleton.metadata || null;
+  const checked = (targets?.checked || []).filter((name) => elements[name]);
+  const skeletonTitled = checked.includes('title') ? [] : structure.skeleton.titled || [];
+  // Every part only asks whether the document IS of this type ("/ddn",
+  // "/dml" in a condition, BRDP-EXT-00029): nothing in the example can
+  // change that, so the application builds the whole document (its minimal
+  // identification and status section and the bare skeleton) and the LLM
+  // writes no content -- only the example's "expected" (rootOnly).
+  if (isRootOnly(targets, chain[0])) {
+    return {
+      path: chain,
+      insertion: chain[chain.length - 1],
+      root: chain[0],
+      allowedChildren: [...(elements[chain[chain.length - 1]]?.children || [])],
+      titled: [],
+      metadata: section ? { element: section.element, tree: section.tree, insertion: false } : null,
+      contentInsertion: false,
+      rootOnly: true,
+      unreachable: null,
+      sectionMissing: null,
+      nestings: [],
+    };
+  }
+  if (targets?.wholeDocument || checked.includes(chain[0])) {
+    return {
+      path: [],
+      insertion: null,
+      root: chain[0],
+      allowedChildren: [...(elements[chain[0]]?.children || [])],
+      titled: (structure.skeleton.titled || []).includes(chain[0]) ? [chain[0]] : [],
+      // The LLM writes the whole document; the prompt still gives it the
+      // minimal identification and status section to start from.
+      metadata: section ? wholeDocumentMetadata(structure, targets, section) : null,
+      contentInsertion: true,
+      unreachable: null,
+      sectionMissing: null,
+      nestings: nestingPaths(structure, targets),
+    };
+  }
+  const classes = classifyRuleTargets(structure, targets);
+  const metadata = section ? { element: section.element, tree: section.tree, insertion: classes.metadata } : null;
+  if (metadata?.insertion) {
+    const routes = metadataRoutes(structure, targets, classes.metadataAlternatives);
+    if (routes.length) metadata.routes = routes;
+  }
+  // GMC, Part 1.3: //@a carried here only by the root (EXT-00057, @pmType
+  // on <pm>): those alternatives need no content -- the example gives the
+  // values in "rootAttributes".
+  const rootAttributes = rootAttributeTargets(structure, targets, section, classes.metadata);
+  const rootAlts = new Set(rootAttributes.flatMap((r) => r.alternatives));
+  const contentAlternatives = classes.contentAlternatives.filter((a) => !rootAlts.has(a));
+  const onlyRootContent = rootAlts.size > 0 && classes.contentAlternatives.length > 0 && contentAlternatives.length === 0 && !classes.predicateContent;
+  // What the content placement looks at: the alternatives about the content.
+  const contentChecked = [
+    ...new Set(contentAlternatives.map((a) => a.checked).filter((name) => name && elements[name])),
+  ];
+  const contentPrefixes = contentAlternatives.map((a) => a.absolutePrefix).filter(Boolean);
+  const carrierAlternatives = [...(targets?.alternatives || []), ...(classes.looseAlternatives || [])].filter((a) => !rootAlts.has(a));
+  const withAttributes = (placed) => {
+    placed.rootAttributes = rootAttributes.map(({ attribute, element }) => ({ attribute, element }));
+    placed.attributeCarriers = attributeCarrierInfos(structure, placed, carrierAlternatives);
+    return placed;
+  };
+  const whole = (insertion, path, contentInsertion) => ({
+    path,
+    insertion,
+    root: chain[0],
+    allowedChildren: [...(elements[insertion]?.children || [])],
+    titled: path.filter((name) => skeletonTitled.includes(name)),
+    metadata,
+    contentInsertion,
+    unreachable: classes.unreachable,
+    rootMismatch: classes.rootMismatch,
+    sectionMissing: classes.sectionMissing,
+    nestings: nestingPaths(structure, targets),
+  });
+  if (!classes.content || onlyRootContent) return withAttributes(whole(chain[chain.length - 1], chain, false));
+
+  // The example that complies must be able to leave out what the rule
+  // checks, so the skeleton stops before the first element it checks.
+  let limit = chain.length;
+  for (let i = 1; i < chain.length; i += 1) {
+    if (contentChecked.includes(chain[i])) {
+      limit = i;
+      break;
+    }
+  }
+  // An absolute path that leaves the skeleton (/dmodule/content/…/thead)
+  // keeps the insertion point on the part they share.
+  for (const prefix of contentPrefixes) {
+    if (prefix[0] !== chain[0]) continue;
+    let common = 0;
+    while (common < prefix.length && common < chain.length && prefix[common] === chain[common]) common += 1;
+    if (prefix.length > common) limit = Math.min(limit, common);
+  }
+
+  // A content alternative with only an attribute (//@materialUsage,
+  // BRDP-S1-00151) checks no element: what the example needs is SOME
+  // element of this schema that carries the attribute (in proced,
+  // <supportEquipDescr>, <supplyDescr> or <spareDescr>, inside
+  // <preliminaryRqmts>, not under <mainProcedure>). The insertion point is
+  // the deepest one from which one of its carriers can be reached.
+  const carrierSets = contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && (a.steps || []).length === 0)
+    .map((a) => Object.keys(elements).filter((n) => (elements[n].attributes || []).includes(a.attribute)))
+    .filter((set) => set.length > 0);
+  // GMC, Part 1.4: X//@a -- the insertion point must also reach a carrier
+  // below X (EXT-00107: <unitOfIssueQualificationSegment> under
+  // <partRepository> in comrep).
+  const descendantCarrierSets = contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && a.descendantAttribute)
+    .map((a) => alternativeCarriers(elements, a))
+    .filter((set) => set.length > 0);
+  const attributeOnlyChecked = contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && ((a.steps || []).length === 0 || a.descendantAttribute))
+    .map((a) => a.attribute);
+  // Mejoras A, Part 2: the examples of this schema have the checked element
+  // inside (or outside) another one (relation, see relationCases): the
+  // insertion point must allow that too.
+  const relationOk = (i) =>
+    !relation || relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], relation, relation.inside);
+  // Colocación, Part 1: an ancestor test in the checked step's predicate
+  // ([not(ancestor::table)], also joined by and/or, also in the operands of
+  // a true/false condition -- BRDP-EXT-00023) and a schema that allows the
+  // checked element both inside and outside that ancestor: the insertion
+  // point must allow both too. <para> held neither <table> nor
+  // <preliminaryRqmts>, so the example with the <footnote> inside a table
+  // could not be written. An ancestor this schema does not have
+  // (<preliminaryRqmts> in descript) asks for nothing; a schema that allows
+  // only one of the cases is Mejoras A's (splitByRelation, `relation`).
+  // A case only the identification and status section allows (relationCases'
+  // metadataOnly, when no other schema allows it in the content) still makes
+  // the relation active, as before (EXT-00134 in comrep: <expression>
+  // outside <referencedApplicGroup> only in the section, so the insertion
+  // point is the root); the prompt gives that case's way too.
+  const activeRelations = relation
+    ? []
+    : (targets?.relations || []).flatMap((r) => {
+        if (!contentChecked.includes(r.element) || !elements[r.ancestor] || r.ancestor === r.element) return [];
+        const cases = relationCases(structure, r);
+        const section = cases.metadataOnly || [];
+        if (!(cases.inside || section.includes('inside')) || !(cases.outside || section.includes('outside'))) return [];
+        return [section.length ? { ...r, section } : r];
+      });
+  const relationsOk = (i) =>
+    activeRelations.every(
+      (r) =>
+        relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], r, true) &&
+        relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], r, false)
+    );
+  // Mejoras F, Part 1.3: //x / not(//x) in the checked step's condition
+  // -- the examples must be able to contain <x>.
+  const containNames = (targets?.containNames || []).filter((name) => elements[name] && !chain.includes(name));
+  const fitsBase = (i) =>
+    contentChecked.every((name) => reachable(elements, chain[i], name))
+    && containNames.every((name) => reachable(elements, chain[i], name))
+    && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
+    && descendantCarrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name, 16)))
+    && relationOk(i)
+    && relationsOk(i);
+  const below = new Map();
+  const under = (name) => {
+    if (!below.has(name)) below.set(name, reachableSet(elements, elements[name]?.children || []));
+    return below.get(name);
+  };
+  // What the example's CONTENT can write below a point: never through the
+  // identification and status section (the application writes it, or the
+  // LLM writes it whole as "metadata").
+  const contentBelow = new Map();
+  const underContent = (name) => {
+    if (!contentBelow.has(name)) {
+      const children = (elements[name]?.children || []).filter((c) => c !== section?.element);
+      contentBelow.set(name, reachableSet(elements, children));
+    }
+    return contentBelow.get(name);
+  };
+  // Part 1.1 (Test de reglas: referencias…): the checked node references one
+  // of a list of destinations (//internalRef[not(@internalRefId = //figure/@id
+  // or …)], BRDP-EXT-00039): the example meant to be accepted contains one,
+  // so the insertion point must also reach at least one destination of each
+  // reference -- <levelledPara> in descript, never <para>, where none fits.
+  // When no point reaches one, the placement is what it was.
+  const references = (targets?.references || [])
+    .filter((r) => contentChecked.includes(r.element))
+    .map((r) => ({ ...r, present: r.destinations.filter((d) => (elements[d.name]?.attributes || []).includes(d.attribute)) }))
+    .filter((r) => r.present.length > 0);
+  const referencesOk = (i) => references.every((r) => r.present.some((d) => underContent(chain[i]).has(d.name)));
+  const useReferences = references.length > 0 && chain.slice(0, limit).some((_n, i) => fitsBase(i) && referencesOk(i));
+  // Default BREX pass, Part 2.2 (BRDP-EXT-00133): an element a predicate
+  // requires to exist (ancestor::dmodule[descendant::referencedApplicGroupRef])
+  // that the content can write: the insertion point must reach it -- <content>,
+  // not <para>. Names only the identification section holds (dmIdent, dmCode)
+  // never count; when no point reaches one, the placement is what it was.
+  const requireNames = (targets?.requireNames || []).filter(
+    (n) => elements[n] && !chain.includes(n) && underContent(chain[0]).has(n)
+  );
+  const requiresOk = (i) => requireNames.every((n) => underContent(chain[i]).has(n));
+  const useRequires = requireNames.length > 0 && chain.slice(0, limit).some((_n, i) => fitsBase(i) && requiresOk(i));
+  const fitsChecked = (i) => fitsBase(i) && (!useReferences || referencesOk(i)) && (!useRequires || requiresOk(i));
+  // Part 1.2: a chain of ancestors the condition looks at around the checked
+  // element (figure/legend/definitionList/title around <internalRef>,
+  // BRDP-EXT-00008): the insertion point must be able to write its outermost
+  // element and the whole chain down to the checked one. A chain no point
+  // holds is reported like an outer element (entryMissing: the next schema,
+  // else "not executable", before any LLM call).
+  const ancestorChains = (targets?.chains || []).filter((c) => contentChecked.includes(c.element));
+  // Mejoras D, Part 1: the insertion point must also hold the OUTERMOST
+  // element each content alternative makes the example write -- its first
+  // element step the skeleton does not already place at or above the point.
+  // //figure//legend/deflist/def (BRDP-EXT-02816, 3.0.1 descript) checks
+  // <def>, which fits in <para> (para/deflist/def), but <figure> does not:
+  // every example was "<figure> is not allowed inside <para>". Now <para0>.
+  const entryAt = (alt, i) => (alt.steps || []).find((n) => elements[n] && !chain.slice(0, i + 1).includes(n)) || null;
+  // Held at chain[i]: the entry is below it and the rest of the path can be
+  // written from there (a later step that never fits is an impossible path,
+  // Mejoras C's check, not a matter of where the example starts).
+  const holds = (alt, i) => {
+    const entry = entryAt(alt, i);
+    if (!entry) return true;
+    return under(chain[i]).has(entry) && writePathOf(elements, chain[i], alt.steps.slice(alt.steps.indexOf(entry))) !== null;
+  };
+  const steppedAlternatives = contentAlternatives.filter((a) => !a.opaque && (a.steps || []).length > 0);
+  // An alternative no point of the skeleton holds counts only when every
+  // alternative is like that: a union keeps testing what it can.
+  const heldSomewhere = steppedAlternatives.filter((a) => chain.slice(0, limit).some((_n, i) => holds(a, i)));
+  const pathAlternatives = heldSomewhere.length ? heldSomewhere : steppedAlternatives;
+  const missingEntries = (i) => [
+    ...pathAlternatives.filter((a) => !holds(a, i)).map((a) => entryAt(a, i)),
+    ...ancestorChains.filter((c) => !chainWay(elements, chain[i], c)).map((c) => c.chain[c.chain.length - 1].name),
+  ];
+  let index = limit - 1;
+  let oldIndex = null;
+  let found = false;
+  let entryMissing = null;
+  for (let i = limit - 1; i >= 0; i -= 1) {
+    if (!fitsChecked(i)) continue;
+    if (oldIndex === null) oldIndex = i;
+    const missing = missingEntries(i);
+    if (missing.length === 0) {
+      index = i;
+      found = true;
+      break;
+    }
+    entryMissing = entryMissing || missing;
+  }
+  // No point holds the outer element: the old point, and the caller is told
+  // (prepareRuleTestSetup tries the next schema, else "not executable").
+  if (!found && oldIndex !== null) index = oldIndex;
+  if (found || oldIndex === null) entryMissing = null;
+  const placed = whole(chain[index], chain.slice(0, index + 1), true);
+  if (entryMissing) {
+    placed.entryMissing = {
+      outer: [...new Set(entryMissing)],
+      checked: [...new Set([...pathAlternatives.map((a) => a.checked), ...ancestorChains.map((c) => c.element)].filter(Boolean))],
+    };
+  }
+  const chainWays = ancestorChains
+    .map((c) => ({ element: c.element, names: [...c.chain].reverse().map((s) => s.name), way: chainWay(elements, placed.insertion, c) }))
+    .filter((c) => c.way);
+  if (chainWays.length) placed.chainWays = chainWays;
+  // Part 2.3: the way to what the checked step's condition looks for
+  // inside the checked element (<pmRef> inside <frontMatter>), from the
+  // insertion point -- never the shortest way to it alone (content/refs/
+  // pmRef, outside <frontMatter>, which the rule never looks at).
+  const innerWays = (targets?.inner || [])
+    .map((x) => ({ element: x.element, names: x.steps.map((s) => s.name), way: innerWay(elements, placed.insertion, x) }))
+    .filter((x) => x.way);
+  if (innerWays.length) placed.innerWays = innerWays;
+  if (references.length) placed.references = references.map((r) => referenceInfo(elements, placed.insertion, r));
+  // The point moved up for an outer element: the prompt gives each such
+  // alternative's whole way from it (para0/figure/legend/deflist/def), so
+  // the LLM never takes the shortest way to the checked element alone
+  // (para0/para/deflist/def).
+  if (oldIndex !== null && index < oldIndex) {
+    const writePaths = [];
+    for (const alt of pathAlternatives) {
+      const entry = entryAt(alt, oldIndex);
+      if (!entry || under(chain[oldIndex]).has(entry)) continue;
+      const way = writePathOf(elements, chain[index], alt.steps.slice(alt.steps.indexOf(entryAt(alt, index))));
+      if (way) writePaths.push(way);
+    }
+    if (writePaths.length) placed.writePaths = writePaths;
+  }
+  // Colocación, Part 1: the way to write the checked element inside each
+  // ancestor, from the insertion point (the prompt and the correction
+  // round give it, like Mejoras D's writePaths).
+  // "Dentro/fuera de X": the way outside too, never "by any other valid
+  // way"; a case only the identification and status section allows gets
+  // its way from the document's root, through the section (`section`).
+  const rootName = structure.skeleton.path[0];
+  const caseWay = (r, inside) =>
+    relationWay(elements, placed.path, placed.insertion, r, inside)
+    || (r.section?.includes(inside ? 'inside' : 'outside') ? relationWay(elements, [], rootName, r, inside) : null);
+  const relationWays = activeRelations
+    .map((r) => ({
+      element: r.element,
+      ancestor: r.ancestor,
+      axis: r.axis,
+      way: caseWay(r, true),
+      outside: caseWay(r, false),
+      ...(r.section ? { section: r.section } : {}),
+    }))
+    .filter((r) => r.way);
+  if (relationWays.length) placed.relationWays = relationWays;
+  if (relation) {
+    const way = relationWay(elements, placed.path, placed.insertion, relation, relation.inside);
+    // Mejoras A's fallback: no schema allows this case in its content, only
+    // through the identification and status section -- its way from the root.
+    const sectionWay = way ? null : relationWay(elements, [], rootName, relation, relation.inside);
+    placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : sectionWay };
+  }
+  // Part 2.3: a name with its own inner way gets no shortest-way route.
+  const innerNames = new Set((placed.innerWays || []).flatMap((x) => x.names));
+  const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n] && !innerNames.has(n));
+  // The way down goes to where each content alternative ENTERS the example:
+  // its first named step below the insertion point (//title/internalRef
+  // checks <internalRef>, directly inside <para>, but the example needs it
+  // inside a <title> -- the way to that <title> is what is missing), or its
+  // checked element when it has no named step (//@x, //*[…]). Never a later
+  // step on its own: the shortest way to levelledPara/title's <title> alone
+  // would go through <figure>.
+  const entryNames = contentAlternatives.map((a) => {
+    const entry = (a.steps || []).find((n) => elements[n] && !placed.path.includes(n));
+    return entry || a.checked;
+  }).filter((n) => n && elements[n]);
+  // An attribute-only alternative enters through its carriers: the
+  // nearest ones (up to ATTRIBUTE_CARRIER_ROUTES) get a way down.
+  for (const set of carrierSets) {
+    const nearest = set
+      .map((name) => [name, name === placed.insertion ? null : nestingPath(elements, placed.insertion, name)])
+      .filter(([, path]) => path)
+      .sort((a, b) => a[1].length - b[1].length || a[0].localeCompare(b[0]))
+      .slice(0, ATTRIBUTE_CARRIER_ROUTES)
+      .map(([name]) => name);
+    entryNames.push(...nearest);
+  }
+  placed.routes = withRoutes
+    ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames, attributeOnlyChecked)
+    : null;
+  return withAttributes(placed);
+}
+
+// Part 2.3: [from, …, element, …, inner names] -- each descendant step by
+// the shortest nesting, each child step direct -- or null when it does not
+// fit from there.
+// Default BREX pass, Part 2.3: a way that only exists through an aside
+// (a footnote or a note, //frontMatter//pmRef by frontMatterList/footnote/
+// para) is a valid but odd example; the way through the document's own
+// structure (frontMatterSubList/frontMatterPmEntry) is tried first.
+const ASIDE_ELEMENTS = new Set(['footnote', 'footnoteRemarks', 'note', 'warning', 'caution']);
+function asideFreeNesting(elements, from, to) {
+  return nestingPath(elements, from, to, ASIDE_ELEMENTS) || nestingPath(elements, from, to);
+}
+function innerWay(elements, from, { element, steps }) {
+  const way = from === element ? [from] : asideFreeNesting(elements, from, element);
+  if (!way) return null;
+  let prev = element;
+  for (const s of steps) {
+    if (s.desc) {
+      const nesting = prev === s.name ? null : asideFreeNesting(elements, prev, s.name);
+      if (!nesting) return null;
+      way.push(...nesting.slice(1));
+    } else {
+      if (!(elements[prev]?.children || []).includes(s.name)) return null;
+      way.push(s.name);
+    }
+    prev = s.name;
+  }
+  return way;
+}
+
+// Part 1.2: the way from `from` down to the checked element through a
+// chain of ancestors (innermost first, each with its link to the one inside
+// it): [from, …, outermost, …, innermost, …, element], or null when the
+// chain does not fit from there. A "parent" link is a direct child.
+function chainWay(elements, from, { element, chain }) {
+  const outerFirst = [...chain].reverse();
+  const first = nestingPath(elements, from, outerFirst[0].name);
+  if (!first) return null;
+  const way = [...first];
+  for (let k = 1; k <= outerFirst.length; k += 1) {
+    const parent = outerFirst[k - 1];
+    const child = k < outerFirst.length ? outerFirst[k].name : element;
+    if (parent.link === 'parent') {
+      if (!(elements[parent.name]?.children || []).includes(child)) return null;
+      way.push(child);
+    } else {
+      const nesting = nestingPath(elements, parent.name, child);
+      if (!nesting) return null;
+      way.push(...nesting.slice(1));
+    }
+  }
+  return way;
+}
+
+// Part 1.1: what the prompt says about one reference: the destinations,
+// the ones the example can write from the insertion point first (nearest
+// first), then the rest in the rule's order; the way to the first ones.
+export const REFERENCE_LIST_MAX = 8;
+const REFERENCE_WAYS = 3;
+function referenceInfo(elements, insertion, reference) {
+  const dist = insertion ? distancesFrom(elements, insertion) : new Map();
+  const writable = reference.present.filter((d) => dist.has(d.name)).sort((a, b) => dist.get(a.name) - dist.get(b.name));
+  const rest = reference.destinations.filter((d) => !writable.includes(d));
+  const ordered = [...writable, ...rest];
+  return {
+    element: reference.element,
+    attribute: reference.attribute,
+    destinations: ordered.map((d) => ({ name: d.name, attribute: d.attribute, path: d.path, writable: writable.includes(d) })),
+    ways: writable.slice(0, REFERENCE_WAYS).map((d) => nestingPath(elements, insertion, d.name)).filter(Boolean),
+  };
+}
+
+// Mejoras D, Part 1: the way from `from` through every element step of an
+// alternative, in order: a step that is a child of the previous one goes
+// right inside it, otherwise by the shortest valid nesting. null when a
+// step cannot be reached.
+function writePathOf(elements, from, steps) {
+  const way = [from];
+  for (const step of steps) {
+    const previous = way[way.length - 1];
+    if ((elements[previous]?.children || []).includes(step)) {
+      way.push(step);
+      continue;
+    }
+    const nesting = nestingPath(elements, previous, step);
+    if (!nesting) return null;
+    way.push(...nesting.slice(1));
+  }
+  return way;
+}
+
+// ─── The complete fragment ──────────────────────────────────────────────────
+
+const indentOf = (n) => '  '.repeat(n);
+
+// The neutral text of a skeleton <title> (T4b). The examples are in
+// English, like the rest of the test fragments.
+export const SKELETON_TITLE_TEXT = 'Example topic';
+
+function escapeXmlText(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Marks, in skeletonNodePaths, the text of a skeleton element (the title's),
+// so the panel dims it with its tags.
+export const SKELETON_TEXT_SUFFIX = '/text()';
+
+// ─── The identification and status section ─────────────────────────────────
+const escXmlText = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escXmlAttr = (v) => escXmlText(v).replace(/"/g, '&quot;');
+
+// The minimal section's tree (skeleton.metadata.tree, from the backend) as
+// indented XML lines, and the node paths of its elements (and of the text of
+// the elements that have some) for the panel to dim. `parentPath` is the
+// path of the element it goes into ("/dmodule[1]"). Same serialization as
+// backend/tests/test_rule_test_skeletons.py's _serialize, which validates
+// every section against the real XSD.
+export function metadataXml(tree, depth = 0, parentPath = '') {
+  const lines = [];
+  const paths = [];
+  const walk = (node, level, path) => {
+    paths.push(path);
+    const attrs = (node.attributes || []).map(([name, value]) => ` ${name}="${escXmlAttr(value)}"`).join('');
+    const children = node.children || [];
+    if (node.text != null && node.text !== '') paths.push(`${path}${SKELETON_TEXT_SUFFIX}`);
+    if (children.length === 0) {
+      lines.push(
+        node.text != null && node.text !== ''
+          ? `${indentOf(level)}<${node.name}${attrs}>${escXmlText(node.text)}</${node.name}>`
+          : `${indentOf(level)}<${node.name}${attrs}/>`
+      );
+      return;
+    }
+    lines.push(`${indentOf(level)}<${node.name}${attrs}>${node.text ? escXmlText(node.text) : ''}`);
+    const seen = {};
+    for (const child of children) {
+      seen[child.name] = (seen[child.name] || 0) + 1;
+      walk(child, level + 1, `${path}/${child.name}[${seen[child.name]}]`);
+    }
+    lines.push(`${indentOf(level)}</${node.name}>`);
+  };
+  walk(tree, depth, `${parentPath}/${tree.name}[1]`);
+  return { xml: lines.join('\n'), paths };
+}
+
+// { xml, skeletonNodePaths }: the skeleton path around the LLM's content.
+// S1000D: the root carries xsi:noNamespaceSchemaLocation with the schema's
+// URL in the project's form (flat/master), so a rule limited to that schema
+// applies. DITA: no schema location (a DITA document names its DTD/shell,
+// never an XSD URL), so the root gets no namespace declaration either.
+// A whole-document placement (empty path) is the content alone. A titled
+// path element (placement.titled) gets <title>SKELETON_TITLE_TEXT</title>
+// as its first child, part of the skeleton.
+// ─── The brexDmRef follows the data module's own code ───────────────────────
+
+// The brexDmRef of the section stands for the project's own BREX, which
+// follows the same decisions as every data module of the project -- so,
+// when the LLM writes the section (metadata.insertion), its data module
+// code is made the DM's own code with the BREX's info code (022) and item
+// location (D). Without this a rule on any code attribute (S1-00342,
+// //@disassyCodeVariant[string-length(.) != 2]) also sees the brexDmRef's
+// code, and there is no default value that suits every rule: the example
+// meant to comply was rejected for the BREX's disassyCodeVariant="A".
+// 3.0.1: the <avee> of brexref/refdm is rebuilt from the <avee> of dmc.
+// Text only (the rest of the section stays exactly as written); returns
+// { text, changed }. Nothing is changed when either code is missing (its
+// validation says so), and the caller skips it for a rule that looks at the
+// brexDmRef itself (ruleLooksAtBrexReference): then what the LLM wrote
+// there is the point of the example. The minimal section of the skeleton
+// (backend) needs nothing: its two codes already share every value.
+// infoCode="022" is kept even when the rule's list excludes it -- the real
+// BREX has that code; ruleTest.js's rejectedByBrexReference then says the
+// rejection comes from the brexDmRef, i.e. the rule would reject the
+// project's BREX too.
+const BREX_REFERENCE_CODE = {
+  identAndStatusSection: { own: ['dmIdent'], brex: 'brexDmRef', code: 'dmCode', overrides: { infoCode: '022', itemLocationCode: 'D' } },
+  idstatus: { own: ['dmaddres', 'dmc'], brex: 'brexref', code: 'avee', overrides: { incode: '022', itemloc: 'D' } },
+};
+const BREX_REFERENCE_NAMES = new Set(['brexDmRef', 'brexref']);
+// A publication module, DDN, DML, comment or SCORM content package (4.x) has
+// no data module code of its own -- its pmCode / ddnCode / dmlCode /
+// commentCode / scormContentPackageCode shares only @modelIdentCode with the
+// BREX's dmCode, so only that follows (a rule on //@modelIdentCode sees the
+// same value in both codes; the BREX's other attributes are left as they
+// are).
+const OTHER_OWN_CODES = [
+  { inside: ['pmIdent'], code: 'pmCode' },
+  { inside: ['ddnIdent'], code: 'ddnCode' },
+  { inside: ['dmlIdent'], code: 'dmlCode' },
+  { inside: ['commentIdent'], code: 'commentCode' },
+  { inside: ['scormContentPackageIdent'], code: 'scormContentPackageCode' },
+];
+const SHARED_CODE_ATTRIBUTES = ['modelIdentCode'];
+const SECTION_TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+const ATTRIBUTE_RE = /([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')/g;
+
+export function ruleLooksAtBrexReference(ruleXml) {
+  return ruleMatchExpressions(ruleXml).some((e) => /(^|[^\w.-])(brexDmRef|brexref)(?![\w.-])/.test(e));
+}
+
+// The first element named `code` -- inside `brex` when given, else inside
+// every one of `inside` and outside any brexDmRef/brexref: { start, openEnd,
+// end, attrs, selfClosing } (offsets in the text), or null.
+function findCodeElement(text, code, { inside = [], brex }) {
+  const stack = [];
+  let found = null;
+  for (const m of text.matchAll(SECTION_TAG_RE)) {
+    if (m[2] === undefined) continue;
+    const name = m[2];
+    if (m[1]) {
+      const at = stack.lastIndexOf(name);
+      if (at >= 0) {
+        if (found && found.depth === at && found.end === null) found.end = m.index + m[0].length;
+        stack.length = at;
+      }
+      continue;
+    }
+    const wanted =
+      !found && name === code && (brex ? stack.includes(brex) : !stack.some((n) => BREX_REFERENCE_NAMES.has(n)) && inside.every((n) => stack.includes(n)));
+    if (wanted) {
+      found = { start: m.index, openEnd: m.index + m[0].length, end: m[4] ? m.index + m[0].length : null, depth: stack.length, attrs: m[3], selfClosing: !!m[4] };
+    }
+    if (!m[4]) stack.push(name);
+  }
+  return found && found.end !== null ? found : null;
+}
+
+const attributeList = (text) => [...String(text || '').matchAll(ATTRIBUTE_RE)].map((m) => [m[1], m[2]]);
+
+// The children of an <avee> as [[name, text]] (text as written).
+const aveeChildren = (inner) => [...inner.matchAll(/<([A-Za-z_][\w.-]*)\s*>([^<]*)<\/\1\s*>/g)].map((m) => [m[1], m[2]]);
+
+const lineIndent = (text, index) => {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  const before = text.slice(lineStart, index);
+  return /^\s*$/.test(before) ? before : null;
+};
+
+export function normalizeBrexReferenceCode(sectionText, sectionElement) {
+  const text = String(sectionText ?? '');
+  const spec = BREX_REFERENCE_CODE[sectionElement];
+  if (!spec || !text.trim()) return { text, changed: false };
+  // Barrido final 2/2, Part 6: malformed text is never edited (an unclosed
+  // element moved the code it found; the section's validation says what is
+  // wrong).
+  if (fragmentWellFormedProblem(text)) return { text, changed: false };
+  const brex = findCodeElement(text, spec.code, { brex: spec.brex });
+  const own = findCodeElement(text, spec.code, { inside: spec.own });
+  if (brex && !own && spec.code === 'dmCode') return followSharedCode(text, brex, spec.code);
+  if (!own || !brex) return { text, changed: false };
+  if (spec.code === 'dmCode') {
+    const ownAttrs = attributeList(own.attrs);
+    const wanted = ownAttrs.map(([name, quoted]) => [name, name in spec.overrides ? `"${spec.overrides[name]}"` : quoted]);
+    for (const [name, value] of Object.entries(spec.overrides)) {
+      if (!wanted.some(([n]) => n === name)) wanted.push([name, `"${value}"`]);
+    }
+    const unquote = (q) => q.slice(1, -1);
+    const current = new Map(attributeList(brex.attrs).map(([n, q]) => [n, unquote(q)]));
+    const same = current.size === wanted.length && wanted.every(([n, q]) => current.get(n) === unquote(q));
+    if (same) return { text, changed: false };
+    const tag = `<${spec.code} ${wanted.map(([n, q]) => `${n}=${q}`).join(' ')}${brex.selfClosing ? '/' : ''}>`;
+    return { text: text.slice(0, brex.start) + tag + text.slice(brex.openEnd), changed: true };
+  }
+  // 3.0.1 <avee>: every child of the DM's own, the overrides as text.
+  const ownInner = text.slice(own.openEnd, own.end - `</${spec.code}>`.length);
+  const brexCloseStart = text.lastIndexOf('</', brex.end - 1);
+  const brexInner = text.slice(brex.openEnd, brexCloseStart);
+  const wanted = aveeChildren(ownInner).map(([n, v]) => [n, n in spec.overrides ? spec.overrides[n] : v]);
+  if (wanted.length === 0) return { text, changed: false };
+  const current = aveeChildren(brexInner);
+  const same = current.length === wanted.length && wanted.every(([n, v], i) => current[i][0] === n && current[i][1] === v);
+  if (same) return { text, changed: false };
+  // Laid out like the <avee> it replaces: one child per line when it had
+  // them, indented one level more than the <avee> itself; else in a row.
+  const brexIndent = lineIndent(text, brex.start);
+  const multiline = /\n/.test(brexInner) && brexIndent !== null;
+  const childIndent = multiline ? `${brexIndent}  ` : '';
+  const children = wanted.map(([n, v]) => `${childIndent}<${n}>${v}</${n}>`);
+  const inner = multiline ? `\n${children.join('\n')}\n${brexIndent}` : children.join('');
+  const openTag = brex.selfClosing ? `<${spec.code}>` : text.slice(brex.start, brex.openEnd);
+  return { text: text.slice(0, brex.start) + openTag + inner + `</${spec.code}>` + text.slice(brex.end), changed: true };
+}
+
+function followSharedCode(text, brex, codeName) {
+  const own = OTHER_OWN_CODES.map((o) => findCodeElement(text, o.code, { inside: o.inside })).find(Boolean);
+  if (!own) return { text, changed: false };
+  const ownAttrs = new Map(attributeList(own.attrs));
+  const brexAttrs = attributeList(brex.attrs);
+  let changed = false;
+  const wanted = brexAttrs.map(([name, quoted]) => {
+    if (SHARED_CODE_ATTRIBUTES.includes(name) && ownAttrs.has(name) && ownAttrs.get(name) !== quoted) {
+      changed = true;
+      return [name, ownAttrs.get(name)];
+    }
+    return [name, quoted];
+  });
+  if (!changed) return { text, changed: false };
+  const tag = `<${codeName} ${wanted.map(([n, q]) => `${n}=${q}`).join(' ')}${brex.selfClosing ? '/' : ''}>`;
+  return { text: text.slice(0, brex.start) + tag + text.slice(brex.openEnd), changed: true, shared: true };
+}
+
+// A data module (placement.metadata) starts with its identification and
+// status section: the minimal one, part of the skeleton, or -- when the
+// rule looks at it (metadata.insertion) -- the section the LLM wrote
+// (`metadata`), as it wrote it. The content is left empty when the rule
+// looks only at the metadata (placement.contentInsertion === false).
+// GMC, Part 1.3: rootAttributes ({ name: value }, the example's values for
+// attributes only the root carries) go on the document's root -- or on the
+// root of the minimal section the application writes, when that is the
+// element that carries them. Never a namespace declaration nor an xsi:
+// attribute: those are the application's (rootAttributeProblems). Their
+// paths go into skeletonNodePaths marked CONTENT_NODE_MARK, so the panel
+// shows them as the example's, not the skeleton's.
+export const CONTENT_NODE_MARK = '!';
+const RESERVED_ROOT_ATTRIBUTE_RE = /^(?:xmlns(?::|$)|xsi:)/;
+const ATTRIBUTE_NAME_RE = /^[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?$/;
+
+export function assembleExample({ standard, schema, schemaLocation, placement, content, metadata = null, rootAttributes = null }) {
+  const path = placement.path;
+  const body = placement.contentInsertion === false ? '' : String(content ?? '').trim();
+  if (path.length === 0) return { xml: String(content ?? '').trim(), skeletonNodePaths: [], rootAttributeProblems: [] };
+  const withSchemaLocation = supportsSchemaContext(standard);
+  const rootAttrs = withSchemaLocation ? [`xmlns:xsi="${XSI_NS}"`] : [];
+  let section = placement.metadata || null;
+  const contentMarks = [];
+  const rootAttributeProblems = [];
+  for (const [name, value] of Object.entries(rootAttributes || {})) {
+    const target = (placement.rootAttributes || []).find((r) => r.attribute === name)?.element || path[0];
+    if (RESERVED_ROOT_ATTRIBUTE_RE.test(name) || !ATTRIBUTE_NAME_RE.test(name)) {
+      rootAttributeProblems.push({ kind: 'reservedRootAttribute', attribute: name, element: target });
+      continue;
+    }
+    if (section && !section.insertion && target === section.element) {
+      section = { ...section, tree: { ...section.tree, attributes: [...(section.tree.attributes || []), [name, value]] } };
+      contentMarks.push(`${CONTENT_NODE_MARK}/${path[0]}[1]/${section.element}[1]/@${name}`);
+    } else {
+      rootAttrs.push(`${name}="${escXmlAttr(value)}"`);
+      contentMarks.push(`${CONTENT_NODE_MARK}/${path[0]}[1]/@${name}`);
+    }
+  }
+  const sectionText = section?.insertion ? String(metadata ?? '').trim() : '';
+  if (/\bxlink:/.test(body) || /\bxlink:/.test(sectionText)) rootAttrs.push(`xmlns:xlink="${XLINK_NS}"`);
+  if (withSchemaLocation && schema) {
+    rootAttrs.push(`xsi:noNamespaceSchemaLocation="${schemaContextUrl(standard, schema, schemaLocation)}"`);
+  }
+  // Whitespace only between skeleton elements (element-only content); the
+  // content sits right against the insertion point's tags, so the text of a
+  // <para> is exactly what the LLM wrote (string(.) value checks see no
+  // added spaces). The panel re-indents for display.
+  const last = path.length - 1;
+  const titled = new Set(placement.titled || []);
+  // Test de reglas DITA: the topic's title the rule asks for
+  // (placement.topicTitle, topicTitleValue.js) instead of "Example topic".
+  const titleOf = (name) =>
+    `<title>${placement.topicTitle?.element === name ? escapeXmlText(placement.topicTitle.value) : SKELETON_TITLE_TEXT}</title>`;
+  const lines = [];
+  const sectionPaths = [];
+  const pushSection = (name) => {
+    if (section.insertion) {
+      if (sectionText) lines.push(`${indentOf(1)}${sectionText}`);
+    } else {
+      const rendered = metadataXml(section.tree, 1, `/${name}[1]`);
+      lines.push(rendered.xml);
+      sectionPaths.push(...rendered.paths);
+    }
+  };
+  path.forEach((name, i) => {
+    const open = `${indentOf(i)}<${name}${i === 0 && rootAttrs.length ? ` ${rootAttrs.join(' ')}` : ''}>`;
+    if (i === 0 && section && last > 0) {
+      lines.push(open);
+      pushSection(name);
+      return;
+    }
+    // Test de reglas: condiciones sobre la sección de identificación del
+    // propio documento -- the insertion point is the root itself
+    // (BRDP-EXT-00134 in comrep: <expression> outside <referencedApplicGroup>
+    // only exists in dmStatus/applic): the section goes first, then the
+    // content. It used to be dropped, so every example had no section.
+    if (i === 0 && section && last === 0) {
+      lines.push(open);
+      pushSection(name);
+      if (body) lines.push(`${indentOf(1)}${body}`);
+      lines.push(`</${name}>`);
+      return;
+    }
+    if (i === last) {
+      lines.push(`${open}${titled.has(name) ? titleOf(name) : ''}${body}</${name}>`);
+    } else {
+      lines.push(open);
+      if (titled.has(name)) lines.push(`${indentOf(i + 1)}${titleOf(name)}`);
+    }
+  });
+  for (let i = last - 1; i >= 0; i -= 1) lines.push(`${indentOf(i)}</${path[i]}>`);
+  const skeletonNodePaths = [];
+  let prefix = '';
+  for (const name of path) {
+    prefix += `/${name}[1]`;
+    skeletonNodePaths.push(prefix);
+    if (titled.has(name)) {
+      // The LLM's content never holds a <title> at this level (the prompt
+      // says the application writes it), so the skeleton's is title[1].
+      skeletonNodePaths.push(`${prefix}/title[1]`, `${prefix}/title[1]${SKELETON_TEXT_SUFFIX}`);
+    }
+  }
+  // Mejoras F, Part 1.4: the insertion point holds what was written for the
+  // test, so it is never counted as the application's.
+  return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths, ...contentMarks], insertionPath: prefix, rootAttributeProblems };
+}
+
+// ─── Model table with a merged row (Barrido final 1/2) ─────────────────────
+// When a rule looks at tables, the examples prompt shows one valid CALS
+// table with a merged row, built here from the schema itself (never typed
+// by hand): every element and attribute it uses is checked against the
+// example schema's structure, and a cell takes its text in a <para> when
+// <entry> does not take text directly (S1000D 4.x). null when the schema
+// lacks any piece (no table, no morerows...), and then the prompt says
+// nothing about tables.
+const CALS_NAMES = new Set(['table', 'tgroup', 'colspec', 'thead', 'tbody', 'tfoot', 'row', 'entry']);
+
+export function ruleLooksAtTables(ruleXml, names) {
+  return names.some((n) => CALS_NAMES.has(n)) || /\bmorerows\b/.test(ruleXml || '');
+}
+
+export function calsTableModel(structure) {
+  const els = structure?.elements || {};
+  const has = (parent, child) => (els[parent]?.children || []).includes(child);
+  const attr = (el, name) => (els[el]?.attributes || []).includes(name);
+  const ok =
+    has('table', 'tgroup') &&
+    has('tgroup', 'colspec') &&
+    has('tgroup', 'thead') &&
+    has('tgroup', 'tbody') &&
+    has('thead', 'row') &&
+    has('tbody', 'row') &&
+    has('row', 'entry') &&
+    attr('tgroup', 'cols') &&
+    attr('colspec', 'colname') &&
+    attr('entry', 'colname') &&
+    attr('entry', 'morerows');
+  if (!ok) return null;
+  const textInEntry = structure.models?.entry ? structure.models.entry.text !== false : true;
+  if (!textInEntry && !has('entry', 'para')) return null;
+  const cell = (col, text, more = '') => `<entry colname="${col}"${more}>${textInEntry ? text : `<para>${text}</para>`}</entry>`;
+  // A required child of <table> before <tgroup> (S1000D: none; a title if
+  // the schema needs one).
+  const required = (structure.models?.table?.required || []).filter((r) => typeof r === 'string' && r !== 'tgroup');
+  const lead = required.includes('title') && has('table', 'title') ? ['    <title>Parts</title>'] : [];
+  return [
+    '<table>',
+    ...lead,
+    '  <tgroup cols="3">',
+    '    <colspec colname="c1"/>',
+    '    <colspec colname="c2"/>',
+    '    <colspec colname="c3"/>',
+    '    <thead>',
+    '      <row>',
+    `        ${cell('c1', 'Item')}`,
+    `        ${cell('c2', 'Description')}`,
+    `        ${cell('c3', 'Qty')}`,
+    '      </row>',
+    '    </thead>',
+    '    <tbody>',
+    '      <row>',
+    `        ${cell('c1', 'A-100', ' morerows="1"')}`,
+    `        ${cell('c2', 'Seal')}`,
+    `        ${cell('c3', '2')}`,
+    '      </row>',
+    '      <row>',
+    `        ${cell('c2', 'Gasket')}`,
+    `        ${cell('c3', '1')}`,
+    '      </row>',
+    '    </tbody>',
+    '  </tgroup>',
+    '</table>',
+  ].join('\n');
+}

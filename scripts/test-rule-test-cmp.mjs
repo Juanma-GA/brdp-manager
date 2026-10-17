@@ -1,0 +1,676 @@
+// Test de reglas: referencias, antepasados y reglas de esquema prohibido.
+// The real rules of «Official Default CMP ATA - 1000BR 4.2 - 009» that failed
+// in the run of scripts/run-project-rule-tests.mjs, verbatim, on the REAL
+// S1000D 4.2 structures (scripts/rule-test-fixtures/structures.json) and the
+// real element graph (scripts/lib/schemaGraph.mjs). The LLM is a fake that
+// returns fixed examples, so what is tested is the application's part:
+// placement, prompt, assembly, engine run and verdict.
+//   node scripts/test-rule-test-cmp.mjs
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { DOMParser } from '@xmldom/xmldom';
+import i18n from '../src/i18n/index.js';
+import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
+import { materializeExample, runExample, ruleTestVerdict, stripDefaultNamespace } from '../src/utils/ruleTest.js';
+import { metadataXml, placeExample, ruleTargets } from '../src/utils/ruleTestSkeleton.js';
+import { formatAcceptCause, formatRuleDescription, formatRuleTestReason, ruleDescriptionText, verdictToTestRecord } from '../src/utils/ruleTestReasons.js';
+import { describeRule, rulePathParts } from '../src/utils/ruleTestEngine.js';
+import { xsdCheck } from './lib/xsdCheck.mjs';
+import { formatCoverageItem } from '../src/validation/schemaCoverage.js';
+import { parseRuleTestResponse } from '../src/prompts/ruleTestExamplesPrompt.js';
+import { schemaGraph } from './lib/schemaGraph.mjs';
+
+let passed = 0;
+let failed = 0;
+function check(name, condition, detail = '') {
+  if (condition) passed += 1;
+  else {
+    failed += 1;
+    console.log(`FAIL ${name}${detail ? `\n     ${String(detail).slice(0, 1500)}` : ''}`);
+  }
+}
+function parseXml(text) {
+  const messages = [];
+  const doc = new DOMParser({ errorHandler: (_l, msg) => messages.push(msg) }).parseFromString(text, 'text/xml');
+  if (messages.length) throw new Error(messages[0].replace(/^\[xmldom \w+\]\s*/, '').split('\n')[0]);
+  return doc;
+}
+const en = i18n.getFixedT('en');
+const es = i18n.getFixedT('es');
+const S42 = 'S1000D 4.2';
+const F = 'BREX-4.2';
+const STRUCTURES = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/structures.json', import.meta.url)));
+const structureOf = (schema) => STRUCTURES[`${S42}|${schema}`];
+const vocabJson = JSON.parse(fs.readFileSync(new URL('../public/schema-vocabulary-4-2.json', import.meta.url)));
+const vocabulary = { elements: new Set(vocabJson.elements), attributes: new Set(vocabJson.attributes) };
+const graph = schemaGraph(S42);
+const CARDS = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url)));
+
+// ─── The real rules, verbatim ───────────────────────────────────────────────
+const sor = (path, use) => `<structureObjectRule><objectPath allowedObjectFlag="0">${path}</objectPath><objectUse>${use}</objectUse></structureObjectRule>`;
+const inContext = (schema, body) => `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/${schema}.xsd"><structureObjectRuleGroup>${body}</structureObjectRuleGroup></contextRules>`;
+const EXT39 = sor(
+  '//internalRef[not(attribute::internalRefId = //figure/@id or attribute::internalRefId = //figureAlts/@id or attribute::internalRefId = //table/@id or attribute::internalRefId = //multimedia/@id or attribute::internalRefId = //multimediaAlts/@id or attribute::internalRefId = //supplyDescr/@id or attribute::internalRefId = //embeddedSupplyDescr/@id or attribute::internalRefId = //supportEquipDescr/@id or attribute::internalRefId = //embeddedSupportEquipDescr/@id or attribute::internalRefId = //spareDescr/@id or attribute::internalRefId = //embeddedSpareDescr/@id or attribute::internalRefId = //levelledPara/@id or attribute::internalRefId = //levelledParaAlts/@id or attribute::internalRefId = //proceduralStep/@id or attribute::internalRefId = //proceduralStepAlts/@id or attribute::internalRefId = //graphic/@id or attribute::internalRefId = //multimediaObject/@id or attribute::internalRefId = //hotspot/@id)]',
+  'BREX-CMMST-00100: The @internalRef can only target figure, figureAlts, table, multimedia, multimediaAlts, supplyDescr, embeddedSupplyDescr, supportEquipDescr, embeddedSupportEquipDescr, spareDescr, embeddedSpareDescr, levelledPara, levelledParaAlts, proceduralStep, proceduralStepAlts, graphic, multimediaObject, and hotspot elements.'
+);
+const EXT08 = sor(
+  '//internalRef[ancestor::title and not(ancestor::title/parent::definitionList/parent::legend/parent::figure/@id = @internalRefId)]',
+  'BREX-CMMST-00095/BREX-CMMST-00119: The &lt;internalRef&gt; element cannot be used within the &lt;title&gt; element except within the figure/legend/defnitionList/title element and then only when it points to the parent figure.'
+);
+const EXT181 = sor(
+  `//dmStatus/@issueType="changed" and (/dmodule/identAndStatusSection/dmStatus/reasonForUpdate[not(@id = /dmodule//@reasonForUpdateRefIds/tokenize(normalize-space(), '\\s'))])`,
+  'BREX-CMMST-00007 (DM_identAndStatusSection): In a changed data module, all &lt;reasonForUpdate&gt; elements must be referenced within the data module.'
+);
+const EXT224 = inContext('pm', sor(
+  `//pmStatus/@issueType="changed" and (/pm/identAndStatusSection/pmStatus/reasonForUpdate[not(@id = /pm//@reasonForUpdateRefIds/tokenize(normalize-space(), '\\s'))])`,
+  'BREX-CMMST-00007 (PM_identAndStatusSection): In a changed publication module, all &lt;reasonForUpdate&gt; elements must be referenced within the publication module.'
+));
+const FORBIDDEN = { container: 'EXT-00076', checklist: 'EXT-00087', sb: 'EXT-00088', schedul: 'EXT-00089', wrngdata: 'EXT-00090' };
+const forbiddenRule = (schema) => inContext(schema, sor('//dmodule', `BREX-CMMST-00006: The ${schema} schema is not allowed.`));
+const EXT86 = inContext('icnmetadata', sor('//icnMetadataFile', 'BREX-CMMST-00006: The icnmetadata schema is not allowed.'));
+const EXT272 = inContext('ipd', sor('//footnote | //footnoteRef', 'BREX-CMMST-00272: Footnotes are not allowed in IPD.'));
+
+// ─── Fetchers: the real structures and graph, no schema cards ───────────────
+const fetchers = {
+  fetchSchemaCards: async (_std, names) => ({
+    cards: Object.fromEntries(names.filter((n) => CARDS.cards[n]).map((n) => [n, { variants: CARDS.cards[n], parents: CARDS.parents[n] || [] }])),
+    document_schemas: graph.schemas,
+  }),
+  fetchStructure: async (_std, schema) => (structureOf(schema) ? { available: true, ...structureOf(schema) } : { available: false }),
+  fetchSchemaGraph: async () => graph,
+};
+const brdp = (id) => ({ identifier: id, title: 't', definition: 'd', proposal: 'p' });
+async function generate(ruleXml, answers, id = 'BRDP-EXT-X') {
+  const asked = [];
+  const proposalChecks = [];
+  const result = await generateRuleTestExamples({
+    ruleXml, format: F, standard: S42, schemaLocation: 'flat', brdp: brdp(id), vocabulary, parseXml, ...fetchers,
+    ruleDescription: 'description',
+    askProposalCheck: async () => {
+      proposalChecks.push(1);
+      return '{"implements": "yes", "reason": ""}';
+    },
+    ask: async (messages, systemPrompt) => {
+      asked.push({ messages, systemPrompt });
+      const answer = answers[asked.length - 1];
+      if (answer === undefined) throw new Error('unexpected LLM call');
+      return typeof answer === 'string' ? answer : JSON.stringify(answer);
+    },
+  });
+  const verdict = result?.status === 'ready' ? ruleTestVerdict(result.examples, result.runs, null, result.proposalCheck, null, result.coverage) : null;
+  return { result, asked, verdict, proposalChecks };
+}
+const setupFor = async (ruleXml) => prepareRuleTestSetup({ ruleXml, standard: S42, schemaLocation: 'flat', ...fetchers, format: F, parseXml });
+
+// ─── Part 1.1: reference destinations (EXT-00039) ──────────────────────────
+{
+  const t = ruleTargets(EXT39);
+  check('1a targets: one reference, 18 destinations', t.references.length === 1 && t.references[0].element === 'internalRef' && t.references[0].attribute === 'internalRefId' && t.references[0].destinations.length === 18, JSON.stringify(t.references));
+  check('1a targets: destinations in the rule order', t.references[0].destinations.slice(0, 3).map((d) => `${d.name}/@${d.attribute}`).join() === 'figure/@id,figureAlts/@id,table/@id');
+  const prep = await setupFor(EXT39);
+  const p = prep.promptPlacements.find((x) => x.role === 'rule');
+  check('1a placement: descript at <levelledPara> (never <para>, where no destination fits)', p.schema === 'descript' && p.insertion === 'levelledPara', `${p.schema} ${p.insertion}`);
+  check('1a placement: writable destinations first', p.references[0].destinations[0].writable && p.references[0].destinations.slice(0, 10).every((d) => d.writable) && !p.references[0].destinations[10].writable, JSON.stringify(p.references[0].destinations.map((d) => [d.name, d.writable])));
+  check('1a placement: ways to the first ones', p.references[0].ways.map((w) => w.join('/')).join(';') === 'levelledPara/figure;levelledPara/figureAlts;levelledPara/table', JSON.stringify(p.references[0].ways));
+  check('1a no SEVERAL NODES for //X/@id', prep.several.length === 0, JSON.stringify(prep.several));
+  const accept = { label: 'points to a figure', expected: 'accept', schema: 'descript', content: '<figure id="f1"><title>Pump</title><graphic infoEntityIdent="ICN-00001"/></figure><para>See <internalRef internalRefId="f1"/>.</para>' };
+  const reject = { label: 'points to a paragraph', expected: 'reject', schema: 'descript', content: '<para id="p1">Remove the cover.</para><para>See <internalRef internalRefId="p1"/>.</para>' };
+  const { result, asked, verdict } = await generate(EXT39, [{ examples: [accept, reject] }], 'BRDP-EXT-00039');
+  const prompt = asked[0].systemPrompt;
+  check('1a prompt: destinations line', prompt.includes('The rule compares @internalRefId of <internalRef> with the @id of <figure>, <figureAlts>, <table>, <multimedia>, <multimediaAlts>, <levelledPara>, <levelledParaAlts>, <graphic> (10 more): an example meant to be accepted contains one of those elements with that @id; the reject example points to an element that exists in the example but is not in the list.'), prompt);
+  check('1a prompt: way to the first ones', prompt.includes('The valid way to the first of them from <levelledPara>: levelledPara/figure; levelledPara/figureAlts; levelledPara/table.'));
+  check('1a prompt: no SEVERAL NODES', !prompt.includes('SEVERAL NODES'));
+  check('1a prompt: content goes inside <levelledPara>', prompt.includes('your content goes directly inside <levelledPara>, at\n  dmodule/content/description/levelledPara.'));
+  check('1a accept example accepted', result.runs[0].result?.status === 'accepted', JSON.stringify(result.runs[0].validation));
+  check('1a reject example rejected, <internalRef> highlighted', result.runs[1].result?.status === 'rejected' && result.runs[1].result.selectedNodePaths.join() === '/dmodule[1]/content[1]/description[1]/levelledPara[1]/para[2]/internalRef[1]', JSON.stringify(result.runs[1].result));
+  check('1a verdict correct, one LLM call', verdict?.kind === 'correct' && asked.length === 1, JSON.stringify(verdict));
+  // No point reaches a destination (only the identification and status
+  // section has <reasonForUpdate>): the placement is what it was.
+  const sectionOnly = sor('//internalRef[not(@internalRefId = //reasonForUpdate/@id)]', 'x');
+  const plain = sor('//internalRef', 'x');
+  const a = placeExample(structureOf('descript'), ruleTargets(sectionOnly));
+  const b = placeExample(structureOf('descript'), ruleTargets(plain));
+  check('1a no reachable destination: placement as today', a.insertion === b.insertion && a.insertion === 'para', `${a.insertion} ${b.insertion}`);
+}
+
+// ─── Part 1.2: chain of ancestors (EXT-00008) ──────────────────────────────
+{
+  const t = ruleTargets(EXT08);
+  check('1b targets: chain title/definitionList/legend/figure', t.chains.length === 1 && t.chains[0].chain.map((s) => `${s.link}:${s.name}`).join() === 'ancestor:title,parent:definitionList,parent:legend,parent:figure', JSON.stringify(t.chains));
+  const prep = await setupFor(EXT08);
+  const p = prep.promptPlacements.find((x) => x.role === 'rule');
+  check('1b placement: <levelledPara> (holds <figure>)', p.insertion === 'levelledPara', p.insertion);
+  check('1b chain way', p.chainWays?.[0]?.way.join('/') === 'levelledPara/figure/legend/definitionList/title/internalRef', JSON.stringify(p.chainWays));
+  check('1b no SEVERAL NODES for the chain', prep.several.length === 0, JSON.stringify(prep.several));
+  const legend = (target) => `<figure id="f1"><title>Pump</title><graphic infoEntityIdent="ICN-00001"/><legend><definitionList><title>Key to <internalRef internalRefId="${target}"/></title><definitionListItem><listItemTerm>1</listItemTerm><listItemDefinition><para>Valve</para></listItemDefinition></definitionListItem></definitionList></legend></figure>`;
+  const examples = [
+    { label: 'points to its figure', expected: 'accept', schema: 'descript', content: legend('f1') },
+    { label: 'points to another figure', expected: 'reject', schema: 'descript', content: `${legend('f2')}<figure id="f2"><title>Valve</title><graphic infoEntityIdent="ICN-00002"/></figure>` },
+    { label: 'outside a title', expected: 'accept', schema: 'descript', content: '<figure id="f1"><title>Pump</title><graphic infoEntityIdent="ICN-00001"/></figure><para>See <internalRef internalRefId="f1"/>.</para>' },
+  ];
+  const { result, asked, verdict } = await generate(EXT08, [{ examples }], 'BRDP-EXT-00008');
+  check('1b prompt: the chain line', asked[0].systemPrompt.includes("The rule's condition looks at figure/legend/definitionList/title around <internalRef>: write it by exactly this way: levelledPara/figure/legend/definitionList/title/internalRef."), asked[0].systemPrompt);
+  check('1b own figure accepted', result.runs[0].result?.status === 'accepted', JSON.stringify(result.runs[0].validation));
+  check('1b other figure rejected', result.runs[1].result?.status === 'rejected', JSON.stringify(result.runs[1]));
+  check('1b outside a title accepted', result.runs[2].result?.status === 'accepted');
+  check('1b verdict correct', verdict?.kind === 'correct', JSON.stringify(verdict));
+  // A chain no schema can write: not executable, before any LLM call.
+  const impossible = sor('//internalRef[ancestor::title/parent::legend]', 'x');
+  const none = await generate(impossible, []);
+  check('1b no chain fits: not executable without the LLM', none.result?.status === 'not_executable' && none.result.reason.code === 'example_no_room' && none.asked.length === 0, JSON.stringify({ s: none.result?.status, r: none.result?.reason, asked: none.asked.length }));
+  check('1b reason EN/ES', formatRuleTestReason(none.result.reason, en).includes('<legend>') && formatRuleTestReason(none.result.reason, es).includes('cabe <legend>'), formatRuleTestReason(none.result.reason, es));
+}
+
+// ─── Part 1.3: a loose attribute in the condition (EXT-00181, EXT-00224) ────
+function changedSection(placement, wrapper) {
+  // The minimal section with issueType="changed" and one <reasonForUpdate>.
+  const { xml } = metadataXml(placement.metadata.tree);
+  return xml
+    .replace(`<${wrapper}>`, `<${wrapper} issueType="changed">`)
+    .replace('</qualityAssurance>', '</qualityAssurance><reasonForUpdate id="rfu-0001"><simplePara>Torque value changed.</simplePara></reasonForUpdate>');
+}
+{
+  const t = ruleTargets(EXT181);
+  check('1c targets: loose attribute', t.looseAttributes.length === 1 && t.looseAttributes[0].attribute === 'reasonForUpdateRefIds' && t.looseAttributes[0].root === 'dmodule', JSON.stringify(t.looseAttributes));
+  const prep = await setupFor(EXT181);
+  const p = prep.promptPlacements.find((x) => x.role === 'rule');
+  check('1c placement: metadata AND content', p.metadata?.insertion === true && p.contentInsertion === true && p.insertion === 'para', JSON.stringify({ meta: p.metadata?.insertion, content: p.contentInsertion, ins: p.insertion }));
+  const carriers = p.attributeCarriers.find((c) => c.attribute === 'reasonForUpdateRefIds');
+  check('1c carriers in the prompt', carriers?.inPrompt && carriers.nearest?.from === 'content', JSON.stringify(carriers?.nearest));
+  const metadata = changedSection(p, 'dmStatus');
+  const examples = [
+    { label: 'referenced from the content', expected: 'accept', schema: 'descript', metadata, content: 'Tighten to <quantity reasonForUpdateRefIds="rfu-0001">25 N.m</quantity>.' },
+    { label: 'not referenced', expected: 'reject', schema: 'descript', metadata, content: 'Tighten the bolt.' },
+  ];
+  const { result, asked, verdict } = await generate(EXT181, [{ examples }], 'BRDP-EXT-00181');
+  check('1c prompt: carriers line', asked[0].systemPrompt.includes('@reasonForUpdateRefIds goes on: <accessPointRef>'), asked[0].systemPrompt);
+  check('1c prompt: metadata and content', asked[0].systemPrompt.includes('your content goes directly inside <para>') && asked[0].systemPrompt.includes('your "metadata" is the WHOLE <identAndStatusSection>'));
+  check('1c referenced accepted', result.runs[0].result?.status === 'accepted', JSON.stringify(result.runs[0].validation));
+  check('1c unreferenced rejected', result.runs[1].result?.status === 'rejected', JSON.stringify(result.runs[1]));
+  check('1c verdict correct', verdict?.kind === 'correct', JSON.stringify(verdict));
+}
+{
+  const prep = await setupFor(EXT224);
+  const p = prep.promptPlacements.find((x) => x.role === 'rule');
+  check('1c pm: placement metadata AND content', p.schema === 'pm' && p.metadata?.insertion === true && p.contentInsertion === true, JSON.stringify({ s: p.schema, meta: p.metadata?.insertion, content: p.contentInsertion }));
+  const metadata = changedSection(p, 'pmStatus');
+  const entry = (ref) => `<dmRef${ref ? ' reasonForUpdateRefIds="rfu-0001"' : ''}><dmRefIdent><dmCode assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="040" infoCodeVariant="A" itemLocationCode="A" modelIdentCode="EXAMPLE" subSubSystemCode="0" subSystemCode="0" systemCode="00" systemDiffCode="A"/></dmRefIdent></dmRef>`;
+  const { result, verdict } = await generate(EXT224, [{ examples: [
+    { label: 'referenced', expected: 'accept', schema: 'pm', metadata, content: entry(true) },
+    { label: 'not referenced', expected: 'reject', schema: 'pm', metadata, content: entry(false) },
+  ] }], 'BRDP-EXT-00224');
+  check('1c pm referenced accepted', result.runs[0].result?.status === 'accepted', JSON.stringify(result.runs[0].validation));
+  check('1c pm unreferenced rejected', result.runs[1].result?.status === 'rejected', JSON.stringify(result.runs[1]));
+  check('1c pm verdict correct', verdict?.kind === 'correct', JSON.stringify(verdict));
+}
+
+// ─── Part 2.1: a schema forbidden by a context block ────────────────────────
+for (const [schema, id] of Object.entries(FORBIDDEN)) {
+  const { result, asked, verdict, proposalChecks } = await generate(forbiddenRule(schema), [], `BRDP-${id}`);
+  check(`2a ${id} (${schema}): no LLM call, not even the Proposal check`, asked.length === 0 && proposalChecks.length === 0, `${asked.length} ${proposalChecks.length}`);
+  check(`2a ${id}: minimal document of ${schema} rejected, another accepted`,
+    result.status === 'ready' && result.examples.length === 2 && result.examples[0].schema === schema && result.examples[0].expected === 'reject' && result.runs[0].result.status === 'rejected'
+    && result.examples[1].expected === 'accept' && result.examples[1].schema !== schema && result.runs[1].result.status === 'accepted',
+    JSON.stringify(result.examples?.map((e, i) => [e.schema, e.expected, result.runs[i].result?.status])));
+  check(`2a ${id}: built by the application, not editable`, result.examples.every((e) => e.minimalDocument === true));
+  check(`2a ${id}: verdict correct`, verdict?.kind === 'correct', JSON.stringify(verdict));
+}
+{
+  // EXT-00086: the application now writes the <imfIdentAndStatusSection> of
+  // <icnMetadataFile>, so it is tested like the other forbidden schemas.
+  const { result, asked, verdict, proposalChecks } = await generate(EXT86, [], 'BRDP-EXT-00086');
+  check('2a EXT-00086: no LLM call, not even the Proposal check', asked.length === 0 && proposalChecks.length === 0, `${asked.length} ${proposalChecks.length}`);
+  check('2a EXT-00086: minimal icnmetadata document rejected, another accepted',
+    result.status === 'ready' && result.examples.length === 2 && result.examples[0].schema === 'icnmetadata' && result.runs[0].result.status === 'rejected'
+    && result.examples[1].schema !== 'icnmetadata' && result.runs[1].result.status === 'accepted',
+    JSON.stringify(result.reason || result.examples?.map((e, i) => [e.schema, e.expected, result.runs[i].result?.status])));
+  check('2a EXT-00086: the minimal document has its section', /<icnMetadataFile[^>]*>\s*<imfIdentAndStatusSection>/.test(result.examples?.[0]?.xml || ''), result.examples?.[0]?.xml);
+  check('2a EXT-00086: verdict correct', verdict?.kind === 'correct', JSON.stringify(verdict));
+  // //dmodule flag 0 outside a context block: since «Reglas que prohíben un
+  // tipo de documento por su raíz», a rule on the root without a context
+  // block -- every data module schema is forbidden, another document type is accepted.
+  const general = await generate(sor('//dmodule', 'x'), []);
+  check('2a //dmodule without a context: no LLM call', general.asked.length === 0 && general.proposalChecks.length === 0, general.asked.length);
+  const generalSchemas = graph.schemas.filter((s) => (graph.roots[s] || []).includes('dmodule'));
+  check('2a //dmodule without a context: every data module schema rejected, one other accepted',
+    general.result.examples.filter((e) => e.expected === 'reject').map((e) => e.schema).sort().join() === generalSchemas.sort().join()
+    && general.result.runs.every((r, i) => r.result.status === (general.result.examples[i].expected === 'reject' ? 'rejected' : 'accepted'))
+    && general.result.examples.filter((e) => e.expected === 'accept').length === 1,
+    JSON.stringify(general.result.examples.map((e, i) => [e.schema, e.expected, general.result.runs[i].result.status])));
+}
+
+// ─── Part 2.2: nothing the rule forbids exists in its context schema ────────
+{
+  const { result, asked, verdict, proposalChecks } = await generate(EXT272, [], 'BRDP-EXT-00272');
+  check('2b EXT-00272: no LLM call', asked.length === 0 && proposalChecks.length === 0, asked.length);
+  check('2b EXT-00272: covered by the schema', verdict?.kind === 'schema_covered' && verdict.items[0].kind === 'absentInContext', JSON.stringify(verdict));
+  check('2b EXT-00272: text EN', formatCoverageItem(verdict.items[0], en) === 'the ipd schema has no <footnote> or <footnoteRef>', formatCoverageItem(verdict.items[0], en));
+  check('2b EXT-00272: text ES', formatCoverageItem(verdict.items[0], es) === 'en el esquema ipd no existen <footnote> ni <footnoteRef>', formatCoverageItem(verdict.items[0], es));
+  check('2b EXT-00272: minimal ipd document shown, accepted', result.examples.length === 1 && result.examples[0].schema === 'ipd' && result.runs[0].result.status === 'accepted');
+  check('2b EXT-00272: its note names what the rule looks for', result.examples[0].absentNames.join() === 'footnote,footnoteRef');
+  check('2b note EN/ES', en('records.ruleTest.minimalDocumentAbsent', { schema: 'ipd', root: 'dmodule', names: '<footnote>, <footnoteRef>' }).endsWith('the rule looks for <footnote>, <footnoteRef>, which no ipd document can contain.')
+    && es('records.ruleTest.minimalDocumentAbsent', { schema: 'ipd', root: 'dmodule', names: '<footnote>' }).endsWith('la regla busca <footnote>, que ningún documento ipd puede contener.'));
+  check('2b one element: singular text', formatCoverageItem({ kind: 'absentInContext', schema: 'ipd', names: ['footnote'] }, es) === 'en el esquema ipd no existe <footnote>');
+  // One of them exists in ipd: a normal test.
+  const mixed = await generate(inContext('ipd', sor('//footnote | //para', 'x')), ['{"examples": []}']);
+  check('2b //footnote | //para in ipd: tested as today (LLM asked)', mixed.asked.length === 1);
+  // A general rule with an element that does not exist: as before.
+  const general = await generate(sor('//footnote', 'x'), ['{"examples": []}']);
+  check('2b general rule: as before (LLM asked)', general.asked.length === 1);
+}
+
+// ─── Part 2.3: a default namespace on the content ───────────────────────────
+{
+  check('2c strip default xmlns', stripDefaultNamespace('<dmodule xmlns="http://www.s1000d.org/S1000D_4-2"><a/></dmodule>').text === '<dmodule><a/></dmodule>');
+  const kept = '<dmodule xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><a/></dmodule>';
+  check('2c prefixed declarations untouched', stripDefaultNamespace(kept).text === kept && stripDefaultNamespace(kept).removed.length === 0);
+  check('2c nested default xmlns untouched', stripDefaultNamespace('<a><b xmlns="u"/></a>').removed.length === 0);
+  check('2c both declarations: only the default one goes', stripDefaultNamespace('<a xmlns:xlink="x" xmlns="u"/>').text === '<a xmlns:xlink="x"/>');
+  const rule = sor('//dmodule', 'x');
+  const prep = await setupFor(rule);
+  const setup = { ...prep.setup, standard: S42 };
+  const content = `<dmodule xmlns="http://www.s1000d.org/S1000D_4-2" xmlns:xlink="http://www.w3.org/1999/xlink">${metadataXml(prep.promptPlacements[0].metadata.tree).xml}<content><description><levelledPara><para>Text.</para></levelledPara></description></content></dmodule>`;
+  const m = materializeExample({ label: 'whole', expected: 'reject', schema: 'descript', content }, setup, parseXml);
+  check('2c namespace removed, noted', m.namespacesRemoved.join() === 'http://www.s1000d.org/S1000D_4-2' && !m.content.includes('xmlns="') && m.content.includes('xmlns:xlink='), JSON.stringify(m.namespacesRemoved));
+  const r = runExample(rule, F, m, { vocabulary, parseXml, schemaLocation: 'flat' });
+  check('2c //dmodule selects it', r.result?.status === 'rejected' && r.result.selectedNodePaths.length === 1, JSON.stringify(r.result));
+  check('2c note EN/ES', en('records.ruleTest.namespaceRemoved', { namespace: 'u' }) === 'Adjusted by the app: removed xmlns="u" (S1000D uses no namespace).' && es('records.ruleTest.namespaceRemoved', { namespace: 'u' }) === 'Ajustado por la app: se quitó xmlns="u" (S1000D no usa espacio de nombres).');
+  const dita = materializeExample({ label: 'x', expected: 'accept', schema: 'descript', content: '<p xmlns="u">x</p>' }, { ...setup, standard: 'DITA 1.3 Xpath2.0' }, parseXml);
+  check('2c DITA unchanged', dita.content === '<p xmlns="u">x</p>' && dita.namespacesRemoved.length === 0);
+}
+
+// ─── Part 2.4: an example without content ───────────────────────────────────
+{
+  const parsed = parseRuleTestResponse('{"examples": [{"label": "a", "expected": "accept", "schema": "descript", "content": "<para>x</para>"}, {"label": "b", "expected": "reject", "schema": "descript"}]}');
+  check('2d parser keeps an example without content', parsed.ok && parsed.examples.length === 2 && parsed.examples[1].noContent === true, JSON.stringify(parsed));
+  const useless = parseRuleTestResponse('{"examples": [{"label": "a", "expected": "accept", "schema": "descript"}]}');
+  check('2d parser: no example with content → error', !useless.ok && /no "content"/.test(useless.error), JSON.stringify(useless));
+  const accept = { label: 'with emphasis elsewhere', expected: 'accept', schema: 'descript', content: 'Remove the cover.' };
+  const rule = sor('//emphasis', 'x');
+  const first = { examples: [accept, { label: 'with emphasis', expected: 'reject', schema: 'descript' }] };
+  const second = { examples: [accept, { label: 'with emphasis', expected: 'reject', schema: 'descript', content: 'Do <emphasis>not</emphasis> remove.' }] };
+  const { result, asked, verdict } = await generate(rule, [first, second]);
+  check('2d the test goes on: one correction round', asked.length === 2 && asked[1].messages.at(-1).content.includes('Example 2 ("with emphasis"):\n- the example has no "content": write it'), asked[1]?.messages.at(-1).content);
+  check('2d corrected and run', result.status === 'ready' && result.runs[1].result?.status === 'rejected' && verdict?.kind === 'correct', JSON.stringify(verdict));
+  check('2d panel text EN/ES', en('records.ruleTest.missingContent') === 'the example has no content' && es('records.ruleTest.missingContent') === 'el ejemplo no tiene contenido');
+}
+
+// ─── Caminos de la sección, Part 1: ways that follow the rule's steps ───────
+// EXT-00188 / EXT-00189 (CMP 4.2, flag 0): //dmodule/identAndStatusSection/
+// dmStatus//para/captionGroup (and …/caption). Before: the ways to any
+// <captionGroup> (copyrightPara/emphasis/captionGroup), none through <para>.
+const EXT188 = sor('//dmodule/identAndStatusSection/dmStatus//para/captionGroup', 'BREX-CMMST-00188: Caption groups are not allowed in the paragraphs of the status section.');
+const EXT189 = sor('//dmodule/identAndStatusSection/dmStatus//para/caption', 'BREX-CMMST-00189: Captions are not allowed in the paragraphs of the status section.');
+const SECTION188 = (restrictions) => `<identAndStatusSection><dmAddress><dmIdent><dmCode assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="040" infoCodeVariant="A" itemLocationCode="A" modelIdentCode="EXAMPLE" subSubSystemCode="0" subSystemCode="0" systemCode="00" systemDiffCode="A"/><language countryIsoCode="US" languageIsoCode="en"/><issueInfo inWork="00" issueNumber="001"/></dmIdent><dmAddressItems><issueDate day="01" month="01" year="2026"/><dmTitle><techName>Example data module</techName></dmTitle></dmAddressItems></dmAddress><dmStatus><security securityClassification="01"/>${restrictions}<responsiblePartnerCompany><enterpriseName>Example company</enterpriseName></responsiblePartnerCompany><originator><enterpriseName>Example company</enterpriseName></originator><applic><displayText><simplePara>All</simplePara></displayText></applic><brexDmRef><dmRef><dmRefIdent><dmCode assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="022" infoCodeVariant="A" itemLocationCode="D" modelIdentCode="EXAMPLE" subSubSystemCode="0" subSystemCode="0" systemCode="00" systemDiffCode="A"/></dmRefIdent></dmRef></brexDmRef><qualityAssurance><unverified/></qualityAssurance></dmStatus></identAndStatusSection>`;
+const RESTRICTIONS = (copyrightPara) => `<dataRestrictions><restrictionInstructions><dataDistribution>Unlimited</dataDistribution></restrictionInstructions><restrictionInfo><copyright><copyrightPara>${copyrightPara}</copyrightPara></copyright></restrictionInfo></dataRestrictions>`;
+const CAPTION_GROUP = '<captionGroup cols="1"><captionBody><captionRow><captionEntry><caption><captionLine>CAUTION</captionLine></caption></captionEntry></captionRow></captionBody></captionGroup>';
+const CAPTION = '<caption><captionLine>CAUTION</captionLine></caption>';
+{
+  for (const [rule, target] of [[EXT188, 'captionGroup'], [EXT189, 'caption']]) {
+    const p = placeExample(structureOf('descript'), ruleTargets(rule));
+    const routes = p.metadata?.routes || [];
+    check(`P1 ${target}: one route, to <${target}> only (no route of its own for <para>)`, routes.length === 1 && routes[0].target === target, JSON.stringify(routes.map((r) => r.target)));
+    check(`P1 ${target}: every way ends …/para/${target} (para the direct parent)`, routes[0].paths.length === 3 && routes[0].paths.every((w) => w[0] === 'dmStatus' && w.at(-1) === target && w.at(-2) === 'para'), JSON.stringify(routes[0].paths));
+  }
+  // the old filter's three problems: steps above the section, a cut before
+  // filtering, and no axis
+  const p188 = placeExample(structureOf('descript'), ruleTargets(EXT188));
+  check('P1 the shortest way that follows the steps comes first', p188.metadata.routes[0].paths[0].join('/') === 'dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/footnote/para/captionGroup', p188.metadata.routes[0].paths[0].join('/'));
+  // //copyright (one step) and //dmStatus//externalPubRef: as before
+  const pc = placeExample(structureOf('descript'), ruleTargets(sor('//copyright', 'x')));
+  check('P1 //copyright: its single way, as before', pc.metadata.routes.length === 1 && !pc.metadata.routes[0].several && pc.metadata.routes[0].paths[0].join('/') === 'dmStatus/dataRestrictions/restrictionInfo/copyright');
+  const pe = placeExample(structureOf('descript'), ruleTargets(sor('//dmStatus//externalPubRef', 'x')));
+  check('P1 //dmStatus//externalPubRef: three ways, as before', pe.metadata.routes[0].paths.map((w) => w.join('/')).join(';') === 'dmStatus/functionalItemRef/refs/externalPubRef;dmStatus/reasonForUpdate/simpleRefPara/externalPubRef;dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/externalPubRef', JSON.stringify(pe.metadata.routes[0].paths));
+  // no way follows the steps (an element that is not below <para>): every
+  // way, as before -- here none at all
+  const pn = placeExample(structureOf('descript'), ruleTargets(sor('//dmStatus//para/dmRef', 'x')));
+  check('P1 a step that no way can follow falls back to the ways to the element', (pn.metadata?.routes || []).every((r) => r.paths.length > 0), JSON.stringify(pn.metadata?.routes));
+  // pm and 3.0.1: the same with their names
+  const ppm = placeExample(structureOf('pm'), ruleTargets(sor('//pm/identAndStatusSection/pmStatus//para/captionGroup', 'x')));
+  check('P1 pm: ways from <pmStatus> through <para>', ppm.metadata.routes[0].paths.every((w) => w[0] === 'pmStatus' && w.at(-2) === 'para'), JSON.stringify(ppm.metadata.routes));
+  const p301 = placeExample(STRUCTURES['S1000D 3.0.1|descript'], ruleTargets(sor('//dmodule/idstatus/status//para/capgrp', 'x')));
+  check('P1 3.0.1: idstatus/status//para/capgrp → status/…/para/capgrp', p301.metadata.routes[0].paths.every((w) => w[0] === 'status' && w.at(-2) === 'para' && w.at(-1) === 'capgrp'), JSON.stringify(p301.metadata.routes));
+
+  // A reject example written by an offered way is valid and rejected; one
+  // with the <captionGroup> outside <para> is accepted, with the cause.
+  const examples = [
+    { label: 'no caption group', expected: 'accept', schema: 'descript', metadata: SECTION188(RESTRICTIONS('Copyright 2026')) },
+    { label: 'caption group in a list paragraph', expected: 'reject', schema: 'descript', metadata: SECTION188(RESTRICTIONS(`<randomList><listItem><para>Note${CAPTION_GROUP}</para></listItem></randomList>`)) },
+    { label: 'caption group in an emphasis', expected: 'accept', schema: 'descript', metadata: SECTION188(RESTRICTIONS(`<emphasis>Note${CAPTION_GROUP}</emphasis>`)) },
+  ];
+  const { result, asked, verdict } = await generate(EXT188, [{ examples }], 'BRDP-EXT-00188');
+  check('P1 EXT-00188 prompt: only …/para/captionGroup ways', asked[0].systemPrompt.includes('copyrightPara/randomList/listItem/para/captionGroup') && !asked[0].systemPrompt.includes('copyrightPara/emphasis/captionGroup'), asked[0].systemPrompt);
+  check('P1 EXT-00188 all three valid', result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation.structure)));
+  check('P1 EXT-00188 reject by an offered way rejected', result.runs[1].result?.status === 'rejected');
+  check('P1 EXT-00188 verdict correct, one LLM call', verdict?.kind === 'correct' && asked.length === 1, JSON.stringify(verdict));
+  const ex189 = examples.map((e) => ({ ...e, metadata: e.metadata.replaceAll(CAPTION_GROUP, CAPTION) }));
+  const r189 = await generate(EXT189, [{ examples: ex189 }], 'BRDP-EXT-00189');
+  check('P1 EXT-00189 verdict correct', r189.verdict?.kind === 'correct', JSON.stringify(r189.result.runs.map((r) => [r.validation.structure, r.result?.status])));
+
+  // the cause: "contains <captionGroup>, but not inside <para>", never "does not contain"
+  const outside = { ...examples[2], expected: 'reject' };
+  const out = await generate(EXT188, [{ examples: [examples[0], outside] }, { examples: [examples[0], outside] }], 'BRDP-EXT-00188');
+  const cause = out.result.runs[1].acceptance?.[0]?.cause;
+  check('P1 cause: outside the path, naming the step', cause?.code === 'cause_outside_path' && cause.params.target === '<captionGroup>' && cause.params.step === '<para>', JSON.stringify(out.result.runs[1].acceptance));
+  check('P1 cause EN', formatAcceptCause(cause, en) === "the example contains <captionGroup>, but not inside <para> as the rule's path requires", formatAcceptCause(cause, en));
+  check('P1 cause ES', formatAcceptCause(cause, es) === 'el ejemplo contiene <captionGroup>, pero no dentro de <para> como exige la ruta de la regla', formatAcceptCause(cause, es));
+  const missing = await generate(EXT188, [{ examples: [examples[0], { ...examples[0], label: 'none', expected: 'reject' }] }, { examples: [examples[0], { ...examples[0], label: 'none', expected: 'reject' }] }], 'BRDP-EXT-00188');
+  check('P1 "does not contain" only when it really is not there', missing.result.runs[1].acceptance?.[0]?.cause?.code === 'cause_missing', JSON.stringify(missing.result.runs[1].acceptance));
+  check('P1 correction of the outside example says which step', out.asked[1].messages.at(-1).content.includes('Its <captionGroup> is not inside <para> as the path requires.'), out.asked[1]?.messages.at(-1).content);
+
+  // correction round: a mixed way (copyrightPara/para) gets the filtered ways
+  const mixed = { label: 'mixed way', expected: 'reject', schema: 'descript', metadata: SECTION188(RESTRICTIONS(`<para>Note${CAPTION_GROUP}</para>`)) };
+  const fixed = { ...mixed, metadata: examples[1].metadata };
+  const mx = await generate(EXT188, [{ examples: [examples[0], mixed] }, { examples: [examples[0], fixed] }], 'BRDP-EXT-00188');
+  const request = mx.asked[1]?.messages.at(-1).content || '';
+  check('P1 correction: "<para> is not allowed inside <copyrightPara>" + the filtered ways', request.includes('<para> is not allowed inside <copyrightPara>. <captionGroup> is not directly inside any element of that section. Valid ways down in this schema (use one of them): dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/footnote/para/captionGroup;'), request);
+  check('P1 correction: no general nesting hint instead', !request.includes('the valid nesting is'), request);
+  check('P1 corrected → correct', mx.verdict?.kind === 'correct', JSON.stringify(mx.verdict));
+}
+
+// ─── Caminos de la sección, Part 2: containers with required attributes ─────
+// EXT-00291 / EXT-00292 (ipd context, flag 0): the LLM wrote <itemSeqNumber>
+// straight in <illustratedPartsCatalog>; <catalogSeqNumber> needs
+// @figureNumber, @item and @indenture, which had no value: never built.
+const EXT291 = inContext('ipd', sor('//itemSeqNumber/partSegment/partRefGroup/optionalPart/partRef[7]', 'BREX-CMMST-00291: An optional part can have at most six part references.'));
+const EXT292 = inContext('ipd', sor('//itemSeqNumber/partSegment/partRefGroup/preferredSparePart/partRef[7]', 'BREX-CMMST-00292: A preferred spare part can have at most six part references.'));
+const partRefs = (n) => Array.from({ length: n }, (_, i) => `<partRef manufacturerCodeValue="12345" partNumberValue="PN-${i + 1}"/>`).join('');
+const itemSeq = (group, n) => `<itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="PN-0"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${group}>${partRefs(n)}</${group}></partRefGroup></partSegment></itemSeqNumber>`;
+{
+  const ipd = structureOf('ipd');
+  check('P2 <catalogSeqNumber> has its required attribute values', JSON.stringify(ipd.models.catalogSeqNumber.attributes) === '[["figureNumber","01"],["indenture","1"],["item","001"]]', JSON.stringify(ipd.models.catalogSeqNumber.attributes));
+  for (const [rule, group, id] of [[EXT291, 'optionalPart', 'EXT-00291'], [EXT292, 'preferredSparePart', 'EXT-00292']]) {
+    const examples = [
+      { label: 'six part references', expected: 'accept', schema: 'ipd', content: itemSeq(group, 6) },
+      { label: 'seven part references', expected: 'reject', schema: 'ipd', content: itemSeq(group, 7) },
+      { label: 'a procedure', expected: 'accept', schema: 'proced', content: '<para>Remove the bolt.</para>' },
+    ];
+    const { result, asked, verdict } = await generate(rule, [{ examples }], `BRDP-${id}`);
+    check(`P2 ${id}: loose <itemSeqNumber> moved by the application, no correction round`, asked.length === 1 && result.examples[0].relocated?.[0]?.path?.join('/') === 'illustratedPartsCatalog/catalogSeqNumber/itemSeqNumber', JSON.stringify(result.examples[0].relocated));
+    check(`P2 ${id}: both ipd examples valid`, result.runs[0].validation.runnable && result.runs[1].validation.runnable, JSON.stringify(result.runs.map((r) => r.validation.structure)));
+    check(`P2 ${id}: 6 accepted, 7 rejected, proced does not apply`, result.runs[0].result?.status === 'accepted' && result.runs[1].result?.status === 'rejected' && result.runs[2].result?.status === 'accepted' && result.runs[2].result.outOfScopeSchemas?.includes('ipd'), JSON.stringify(result.runs.map((r) => [r.result?.status, r.result?.outOfScopeSchemas])));
+    check(`P2 ${id}: verdict correct`, verdict?.kind === 'correct', JSON.stringify(verdict));
+    if (id === 'EXT-00291') {
+      check('P2 the relocated example carries the attribute values', /<catalogSeqNumber figureNumber="01" indenture="1" item="001">\s*<itemSeqNumber/.test(result.examples[0].xml), result.examples[0].xml);
+      const xsd = await xsdCheck(fileURLToPath(new URL('../sources/SchemasS1000D/4.2/ipd.xsd', import.meta.url)), result.examples[1].xml);
+      const inCatalog = xsd === 'valid' ? [] : xsd.split('\n').filter((l) => /catalogSeqNumber|itemSeqNumber|partRef|optionalPart|partSegment/.test(l));
+      check('P2 the relocated example is valid against the real ipd XSD (its catalog part)', inCatalog.length === 0, xsd);
+      const broken = await xsdCheck(fileURLToPath(new URL('../sources/SchemasS1000D/4.2/ipd.xsd', import.meta.url)), result.examples[1].xml.replace('figureNumber="01"', 'figureNumber="AA"'));
+      check('P2 (the XSD check does catch a bad value there)', /figureNumber/.test(broken), broken);
+    }
+  }
+  // the correction never says "goes inside <C>" and "do not change … its nesting" together
+  const p = placeExample(ipd, ruleTargets(EXT291));
+  const keepWrap = keepMatchedNodeProblem(EXT291, [], rulePathParts(EXT291, F, { parseXml }), { wrapping: true });
+  const keepPlain = keepMatchedNodeProblem(EXT291, [], rulePathParts(EXT291, F, { parseXml }));
+  check('P2 keep line (plain) as before', keepPlain.includes('its nesting'));
+  check('P2 keep line (wrapping) allows the container, never the nesting ban', !keepWrap.includes('its nesting') && keepWrap.includes('putting them inside the container a problem above names is part of that fix') && keepWrap.includes('Do not remove them'), keepWrap);
+  check('P2 keep line never names the path with its predicates', !keepWrap.includes('[7]'), keepWrap);
+  const ex = [{ label: 'loose', expected: 'reject', schema: 'ipd', content: itemSeq('optionalPart', 7) }];
+  const failures = exampleFailures(ex, [{ schema: 'ipd' }], [{ validation: { runnable: false, wellFormed: true, structure: [{ kind: 'notAllowed', element: 'itemSeqNumber', parent: 'illustratedPartsCatalog' }], names: {} } }], {
+    ruleXml: EXT291, standard: S42, format: F, parseXml, setup: { placements: { ipd: { structure: ipd, placement: p } } },
+  });
+  const text = failures[0].problems.join('\n');
+  check('P2 correction: "goes inside <catalogSeqNumber>"', text.includes('goes inside <catalogSeqNumber>'), text);
+  check('P2 correction: no contradiction ("its nesting" absent)', !(text.includes('goes inside <catalogSeqNumber>') && /do not change[^\n]*its nesting/.test(text)), text);
+
+  // describeRule: the position
+  const d = (rule, t) => ruleDescriptionText(describeRule(rule, F, { parseXml }), t);
+  check('P2 describe [7] EN', d(EXT291, en).includes('the <partRef> number 7 inside <optionalPart> (that is, more than 6) must not appear'), d(EXT291, en));
+  check('P2 describe [7] ES', d(EXT291, es).includes('el <partRef> número 7 dentro de <optionalPart> (es decir, más de 6) no puede aparecer'), d(EXT291, es));
+  check('P2 describe [1]', d(sor('//optionalPart/partRef[1]', 'x'), en).includes('the first <partRef> inside <optionalPart> (that is, any <partRef> there)'), d(sor('//optionalPart/partRef[1]', 'x'), en));
+  check('P2 describe [last()]', d(sor('//optionalPart/partRef[last()]', 'x'), es).includes('el último <partRef> dentro de <optionalPart>'), d(sor('//optionalPart/partRef[last()]', 'x'), es));
+  check('P2 describe [position() > 6]', d(sor('//optionalPart/partRef[position() > 6]', 'x'), en).includes('any <partRef> from number 7 on inside <optionalPart> (that is, more than 6)'));
+  check('P2 describe under "//": literal as before', d(sor('//optionalPart//partRef[7]', 'x'), en).includes('<partRef> matching the condition [7]'));
+}
+
+// ─── Colocación: node tests (text()/node()/child::) and ancestor relations ──
+// EXT-00030 (CMP 4.2, flag 0): //assert/child::text() was opaque -- placed in
+// <para>, where <assert> cannot go (0 of 3 examples valid). EXT-00023:
+// //footnote[not(ancestor::table) and not(ancestor::preliminaryRqmts)] was
+// placed in <para>, where <table> cannot go.
+const EXT30 = sor('//assert/child::text()', 'BREX-CMMST-00030: The &lt;assert&gt; element must be empty.');
+const EXT23 = sor('//footnote[not(ancestor::table) and not(ancestor::preliminaryRqmts)]', 'BREX-CMMST-00023: Footnotes are only allowed in tables and preliminary requirements.');
+// The ATA form of the same decision, as a true/false condition (reconstructed:
+// the real text of the ATA rule is not in the repository).
+const EXT23ATA = sor('//footnote[not(ancestor::table)] and //footnote[not(ancestor::preliminaryRqmts)]', 'Footnotes are only allowed in tables and preliminary requirements.');
+const FOOT_TABLE = sor('//footnote[not(ancestor::table)]', 'Footnotes are only allowed in tables.');
+const ASSERT = (text) => `<referencedApplicGroup><applic id="app-0001"><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"${text === null ? '/>' : `>${text}</assert>`}</applic></referencedApplicGroup>`;
+{
+  const t = ruleTargets(EXT30);
+  const alt = t.alternatives[0];
+  check('NT targets: //assert/child::text() not opaque, <assert> checked', !alt.opaque && alt.checked === 'assert' && alt.nodeTest === 'text' && alt.steps.join() === 'assert', JSON.stringify(alt));
+  for (const [path, kind] of [['//x/text()', 'text'], ['//x/node()', 'node'], ['//x/comment()', 'comment'], ['//x/child::node()', 'node'], ['//x/processing-instruction()', 'pi'], ["//x/processing-instruction('a')", 'pi']]) {
+    const a = ruleTargets(sor(path, 'x')).alternatives[0];
+    check(`NT node test ${path}`, !a.opaque && a.checked === 'x' && a.nodeTest === kind, JSON.stringify(a));
+  }
+  const fn = ruleTargets(sor('//x/string()', 'x')).alternatives[0];
+  check('NT last step a function: opaque as today', fn.opaque && fn.checked === null, JSON.stringify(fn));
+  const v = ruleTargets(sor('//x/$v', 'x')).alternatives[0];
+  check('NT last step a variable: opaque as today', v.opaque, JSON.stringify(v));
+  const childPred = ruleTargets(sor('//x[child::y]', 'x')).alternatives[0];
+  const plainPred = ruleTargets(sor('//x[y]', 'x')).alternatives[0];
+  check('NT //x[child::y]: as //x[y]', JSON.stringify(childPred) === JSON.stringify(plainPred), JSON.stringify(childPred));
+  check('NT child::x in a step = x', JSON.stringify(ruleTargets(sor('//para/child::emphasis', 'x')).alternatives[0].steps) === '["para","emphasis"]');
+  const descript = structureOf('descript');
+  const asText = placeExample(descript, t, { withRoutes: true });
+  const asAssert = placeExample(descript, ruleTargets(sor('//assert', 'x')), { withRoutes: true });
+  check('NT placed as //assert (descript)', asText.insertion === asAssert.insertion && asText.insertion === 'content' && asText.insertion !== 'para', `${asText.insertion} ${asAssert.insertion}`);
+  // The engine: <assert/> accepted, text or a space rejected.
+  const { result, asked, verdict } = await generate(EXT30, [{ examples: [
+    { label: 'empty assert', expected: 'accept', schema: 'descript', content: ASSERT(null) },
+    { label: 'assert with text', expected: 'reject', schema: 'descript', content: ASSERT('Model A') },
+    { label: 'assert with a space', expected: 'reject', schema: 'descript', content: ASSERT(' ') },
+  ] }], 'BRDP-EXT-00030');
+  const prompt = asked[0].systemPrompt;
+  check('NT prompt: content inside <content>', prompt.includes('your content goes directly inside <content>, at\n  dmodule/content.'), prompt);
+  check('NT examples valid', result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation)));
+  check('NT <assert/> accepted', result.runs[0].result?.status === 'accepted', JSON.stringify(result.runs[0].result));
+  check('NT <assert>text</assert> rejected', result.runs[1].result?.status === 'rejected' && result.runs[1].result.selectedNodePaths.join() === '/dmodule[1]/content[1]/referencedApplicGroup[1]/applic[1]/assert[1]/text()[1]', JSON.stringify(result.runs[1].result));
+  check('NT <assert> </assert> rejected', result.runs[2].result?.status === 'rejected', JSON.stringify(result.runs[2].result));
+  check('NT verdict correct, one LLM call', verdict?.kind === 'correct' && asked.length === 1, JSON.stringify(verdict));
+  // No skeleton whitespace inside the element the text() step reads: the
+  // assembled accept example has no text node in <assert>.
+  const assembled = parseXml(result.examples[0].xml);
+  const asserts = Array.from(assembled.getElementsByTagName('assert'));
+  check('NT no skeleton whitespace inside <assert>', asserts.length === 1 && asserts[0].childNodes.length === 0, result.examples[0].xml);
+  // describeRule
+  const d = (rule, t) => ruleDescriptionText(describeRule(rule, F, { parseXml }), t);
+  check('NT describe EN', d(EXT30, en).includes('<assert> must not contain any text, not even spaces'), d(EXT30, en));
+  check('NT describe ES', d(EXT30, es).includes('<assert> no puede contener texto, ni siquiera espacios'), d(EXT30, es));
+  check('NT describe flag 1 EN/ES', d(sor('//assert/text()', 'x').replace('"0"', '"1"'), en).includes('Each <assert> must contain text') && d(sor('//assert/text()', 'x').replace('"0"', '"1"'), es).includes('Cada <assert> debe contener texto'), d(sor('//assert/text()', 'x').replace('"0"', '"1"'), es));
+  check('NT describe node() EN/ES', d(sor('//levelledPara/node()', 'x'), en).includes('<levelledPara> must be empty: no elements, text, spaces or comments') && d(sor('//levelledPara/node()', 'x'), es).includes('<levelledPara> debe estar vacío'), d(sor('//levelledPara/node()', 'x'), es));
+  check('NT describe comment() EN/ES', d(sor('//para/comment()', 'x'), en).includes('<para> must not contain comments') && d(sor('//para/comment()', 'x'), es).includes('<para> no puede contener comentarios'));
+  check('NT describe: text() under "//" as before', !d(sor('//assert//text()', 'x'), en).includes('must not contain any text'), d(sor('//assert//text()', 'x'), en));
+}
+{
+  // The three real text() paths of the repository's BREX files.
+  const descript = structureOf('descript');
+  const iref = placeExample(descript, ruleTargets(sor('/dmodule/content//internalRef/text()', 'x')), { withRoutes: true });
+  check('NT /dmodule/content//internalRef/text(): content', iref.contentInsertion === true && iref.metadata?.insertion === false, JSON.stringify({ c: iref.contentInsertion, m: iref.metadata?.insertion }));
+  const assertSection = placeExample(descript, ruleTargets(sor('/dmodule/identAndStatusSection/dmStatus/applic//assert/text()', 'x')), { withRoutes: true });
+  check('NT …/dmStatus/applic//assert/text(): the section', assertSection.metadata?.insertion === true && assertSection.contentInsertion === false, JSON.stringify({ c: assertSection.contentInsertion, m: assertSection.metadata?.insertion }));
+  const dist = placeExample(descript, ruleTargets(sor('/dmodule/identAndStatusSection/dmStatus/dataRestrictions/restrictionInstructions/dataDistribution/text()', 'x')), { withRoutes: true });
+  check('NT …/dataDistribution/text(): the section', dist.metadata?.insertion === true, JSON.stringify(dist.metadata?.insertion));
+  for (const path of ['/dmodule/content//internalRef/text()', '/dmodule/identAndStatusSection/dmStatus/applic//assert/text()', '/dmodule/identAndStatusSection/dmStatus/dataRestrictions/restrictionInstructions/dataDistribution/text()']) {
+    const a = ruleTargets(sor(path, 'x')).alternatives[0];
+    const name = a.steps[a.steps.length - 1];
+    check(`NT real path not opaque: ${path}`, !a.opaque && a.checked === name && a.nodeTest === 'text', JSON.stringify(a));
+    const text = ruleDescriptionText(describeRule(sor(path, 'x'), F, { parseXml }), en);
+    check(`NT real path described: ${path}`, text.includes(`<${name}> must not contain any text, not even spaces`), text);
+  }
+  const iRun = await generate(sor('/dmodule/content//internalRef/text()', 'x'), [{ examples: [
+    { label: 'empty', expected: 'accept', schema: 'descript', content: 'See <internalRef internalRefId="par-0001"/>.' },
+    { label: 'with text', expected: 'reject', schema: 'descript', content: 'See <internalRef internalRefId="par-0001">Fig 1</internalRef>.' },
+  ] }]);
+  check('NT <internalRef> with text rejected', iRun.result.runs[1].result?.status === 'rejected' && iRun.result.runs[0].result?.status === 'accepted' && iRun.verdict?.kind === 'correct', JSON.stringify(iRun.result.runs.map((r) => r.result?.status)));
+}
+{
+  // Ancestor relations: the predicate's and/or terms.
+  const t = ruleTargets(EXT23);
+  check('NT relations: table and preliminaryRqmts, negated', JSON.stringify(t.relations) === JSON.stringify([
+    { element: 'footnote', axis: 'ancestor', ancestor: 'table', negated: true },
+    { element: 'footnote', axis: 'ancestor', ancestor: 'preliminaryRqmts', negated: true },
+  ]), JSON.stringify(t.relations));
+  check('NT relations: also in the operands of a condition (ATA form)', ruleTargets(EXT23ATA).relations.length === 2, JSON.stringify(ruleTargets(EXT23ATA).relations));
+  check('NT relations: a chain covers its first ancestor (EXT-00008)', ruleTargets(EXT08).relations.length === 0, JSON.stringify(ruleTargets(EXT08).relations));
+  const descript = structureOf('descript');
+  const proced = structureOf('proced');
+  for (const [name, rule] of [['EXT-00023', EXT23], ['ATA form', EXT23ATA], ['//footnote[not(ancestor::table)]', FOOT_TABLE]]) {
+    const pd = placeExample(descript, ruleTargets(rule), { withRoutes: true });
+    check(`NT ${name} descript: insertion admits <table>`, pd.insertion === 'levelledPara' && pd.allowedChildren.includes('table'), pd.insertion);
+    check(`NT ${name} descript: way inside <table>, no <preliminaryRqmts>`, pd.relationWays?.length === 1 && pd.relationWays[0].ancestor === 'table' && pd.relationWays[0].way.join('/') === 'levelledPara/table/title/footnote', JSON.stringify(pd.relationWays));
+  }
+  const pp = placeExample(proced, ruleTargets(EXT23), { withRoutes: true });
+  check('NT EXT-00023 proced: insertion at <procedure> (table and preliminaryRqmts below)', pp.insertion === 'procedure' && pp.allowedChildren.includes('preliminaryRqmts') && pp.relationWays.map((r) => r.ancestor).join() === 'table,preliminaryRqmts', JSON.stringify({ ins: pp.insertion, ways: pp.relationWays }));
+  const ppAta = placeExample(proced, ruleTargets(EXT23ATA), { withRoutes: true });
+  check('NT ATA form proced: same insertion', ppAta.insertion === 'procedure', ppAta.insertion);
+  // EXT-00177 stays as before (split by schema, Mejoras A).
+  const s177 = await setupFor(sor('//commonInfo[not(ancestor::procedure)]', 'x'));
+  check('NT EXT-00177 unchanged: process + proced', s177.promptPlacements.map((p) => `${p.schema}:${p.insertion}`).join() === 'process:process,proced:procedure', JSON.stringify(s177.promptPlacements.map((p) => `${p.schema}:${p.insertion}`)));
+  // generateRuleTestExamples in descript: in a table accepted, outside rejected.
+  const inTable = '<table><title>Torque values<footnote><para>Dry threads.</para></footnote></title><tgroup cols="1"><tbody><row><entry><para>25</para></entry></row></tbody></tgroup></table>';
+  const outside = '<para>Tighten the bolt<footnote><para>Dry threads.</para></footnote>.</para>';
+  for (const [name, rule] of [['EXT-00023', EXT23], ['ATA form', EXT23ATA]]) {
+    const { result, asked, verdict } = await generate(rule, [{ examples: [
+      { label: 'footnote in a table', expected: 'accept', schema: 'descript', content: inTable },
+      { label: 'footnote outside a table', expected: 'reject', schema: 'descript', content: outside },
+    ] }]);
+    const prompt = asked[0].systemPrompt;
+    check(`NT ${name} prompt: content inside <levelledPara>`, prompt.includes('your content goes directly inside <levelledPara>'), prompt);
+    check(`NT ${name} prompt: the way inside <table>`, prompt.includes("The rule's path looks at whether <footnote> is inside <table>. Write <footnote> inside by exactly one of these ways") && prompt.includes('<footnote> inside <table>: levelledPara/table/title/footnote'), prompt);
+    check(`NT ${name} examples valid`, result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation.structure)));
+    check(`NT ${name} in a table accepted, outside rejected`, result.runs[0].result?.status === 'accepted' && result.runs[1].result?.status === 'rejected', JSON.stringify(result.runs.map((r) => r.result?.status)));
+    check(`NT ${name} verdict correct, one LLM call`, verdict?.kind === 'correct' && asked.length === 1, JSON.stringify(verdict));
+  }
+  // proced: one footnote in a table and another in preliminaryRqmts.
+  const procedSetup = (rule) => ({ standard: S42, schemaLocation: 'flat', placements: { proced: { structure: proced, placement: placeExample(proced, ruleTargets(rule), { withRoutes: true }) } } });
+  const prelim = '<preliminaryRqmts><reqCondGroup><noConds/></reqCondGroup><reqPersons><personnel/></reqPersons><reqSupportEquips><supportEquipDescrGroup><footnote><para>Calibrated.</para></footnote></supportEquipDescrGroup></reqSupportEquips><reqSupplies><noSupplies/></reqSupplies><reqSpares><noSpares/></reqSpares><reqSafety><noSafety/></reqSafety></preliminaryRqmts>';
+  const procTable = `<mainProcedure>${inTable}<proceduralStep><para>Tighten the bolt.</para></proceduralStep></mainProcedure>`;
+  const procOutside = '<mainProcedure><proceduralStep><para>Tighten the bolt<footnote><para>Dry threads.</para></footnote>.</para></proceduralStep></mainProcedure>';
+  const runProced = (rule, content, expected) => {
+    const m = materializeExample({ label: 'x', expected, schema: 'proced', content }, procedSetup(rule), parseXml);
+    return runExample(rule, F, m, { vocabulary, parseXml, schemaLocation: 'flat' });
+  };
+  const both = `${prelim}${procTable}`;
+  const r1 = runProced(EXT23, both, 'accept');
+  check('NT EXT-00023 proced: table + preliminaryRqmts valid and accepted', r1.validation.runnable && r1.result?.status === 'accepted', JSON.stringify({ v: r1.validation.structure, r: r1.result?.status }));
+  const r2 = runProced(EXT23, procOutside, 'reject');
+  check('NT EXT-00023 proced: outside both rejected', r2.validation.runnable && r2.result?.status === 'rejected', JSON.stringify({ v: r2.validation.structure, r: r2.result?.status }));
+  const r3 = runProced(EXT23ATA, both, 'accept');
+  check("NT ATA form proced: a table one and a preliminaryRqmts one is still rejected (the ATA rule's own failure)", r3.validation.runnable && r3.result?.status === 'rejected', JSON.stringify({ v: r3.validation.structure, r: r3.result?.status }));
+  const r4 = runProced(EXT23ATA, `${procTable}`, 'accept');
+  check('NT ATA form proced: only in a table accepted', r4.result?.status === 'accepted', JSON.stringify(r4.result?.status));
+  // The correction round repeats the way on "<table> is not allowed inside <para>".
+  const pd = placeExample(descript, ruleTargets(EXT23), { withRoutes: true });
+  const failures = exampleFailures(
+    [{ label: 'in a table', expected: 'accept', schema: 'descript', content: `<para>${inTable}</para>` }],
+    [{ schema: 'descript' }],
+    [{ validation: { runnable: false, wellFormed: true, structure: [{ kind: 'notAllowed', element: 'table', parent: 'para' }], names: {} } }],
+    { ruleXml: EXT23, standard: S42, format: F, parseXml, setup: { placements: { descript: { structure: descript, placement: pd } } } }
+  );
+  const text = failures[0]?.problems.join('\n') || '';
+  check('NT correction: the way inside <table> again', text.includes('<table> is not allowed inside <para>') && text.includes('<footnote> inside <table> is written by exactly this way: levelledPara/table/title/footnote.'), text);
+  // No schema admits <commonInfo> inside <description>: as today (Mejoras
+  // A), now also when the test is joined to another one by "and".
+  const none = await generate(sor('//commonInfo[ancestor::description and not(ancestor::procedure)]', 'x'), []);
+  check('NT no schema admits the element inside the ancestor: not executable, no LLM (Mejoras A)', none.result?.status === 'not_executable' && none.result.reason.code === 'example_impossible' && none.asked.length === 0, JSON.stringify({ s: none.result?.status, r: none.result?.reason }));
+}
+
+// ─── Reglas que prohíben un tipo de documento por su raíz, sin bloque de
+// contexto (BRDP-EXT-00154 corregida: /scormContentPackage flag 0) ─────────
+const EXT154_GENERAL = sor('/scormContentPackage', 'BREX-CMMST-00006: The scorm content package schema is not allowed.');
+{
+  for (const [rule, schema, id] of [
+    [EXT154_GENERAL, 'scormcontentpackage', 'BRDP-EXT-00154'],
+    [sor('/comment', 'BREX-CMMST-00006: The comment schema is not allowed.'), 'comment', 'BRDP-EXT-00103'],
+    [sor('/pm', 'x'), 'pm', 'BRDP-X-PM'],
+  ]) {
+    const { result, asked, verdict, proposalChecks } = await generate(rule, [], id);
+    check(`ROOT ${id}: no LLM call, not even the Proposal check`, asked.length === 0 && proposalChecks.length === 0, `${asked.length} ${proposalChecks.length}`);
+    check(`ROOT ${id}: minimal ${schema} rejected, descript accepted`,
+      result.status === 'ready' && result.examples.length === 2
+      && result.examples[0].schema === schema && result.examples[0].expected === 'reject' && result.runs[0].result.status === 'rejected'
+      && result.examples[1].schema === 'descript' && result.examples[1].expected === 'accept' && result.runs[1].result.status === 'accepted',
+      JSON.stringify(result.reason || result.examples?.map((e, i) => [e.schema, e.expected, result.runs[i].result?.status])));
+    check(`ROOT ${id}: built by the application, not editable`, result.examples.every((e) => e.minimalDocument === true));
+    check(`ROOT ${id}: verdict correct`, verdict?.kind === 'correct', JSON.stringify(verdict));
+  }
+  // The description: "No document may be a <scormContentPackage>".
+  const d = describeRule(EXT154_GENERAL, F, { parseXml, graph });
+  check('ROOT describe EN', formatRuleDescription(d, en).lines.join() === 'No document may be a <scormContentPackage> (scormcontentpackage schema).', JSON.stringify(formatRuleDescription(d, en)));
+  check('ROOT describe ES', formatRuleDescription(d, es).lines.join() === 'Ningún documento puede ser un <scormContentPackage> (esquema scormcontentpackage).', JSON.stringify(formatRuleDescription(d, es)));
+  const two = describeRule(sor('/pm | //ddn', 'x'), F, { parseXml, graph });
+  check('ROOT describe two roots ES', formatRuleDescription(two, es).lines.join() === 'Ningún documento puede ser un <pm> o <ddn> (esquemas ddn, pm).', JSON.stringify(formatRuleDescription(two, es)));
+  // Without the graph, nothing is known about R: as before.
+  check('ROOT describe without the graph: as before', describeRule(EXT154_GENERAL, F, { parseXml }).statements[0].statement.code !== 'describe_root_document_forbidden');
+  // In a context block: the description as before.
+  check('ROOT describe in a context block: as before', describeRule(forbiddenRule('container'), F, { parseXml, graph }).statements[0].statement.code !== 'describe_root_document_forbidden');
+  // Edge cases that stay as today: flag 1, a predicate, a condition (EXT-00029).
+  const flag1 = await generate(EXT154_GENERAL.replace('allowedObjectFlag="0"', 'allowedObjectFlag="1"'), ['{"examples": []}']);
+  check('ROOT flag 1: as today (the LLM is asked)', flag1.asked.length === 1, flag1.asked.length);
+  check('ROOT flag 1: description as today', describeRule(EXT154_GENERAL.replace('allowedObjectFlag="0"', 'allowedObjectFlag="1"'), F, { parseXml, graph }).statements[0].statement.code !== 'describe_root_document_forbidden');
+  const predicate = await generate(sor('/pm[pmStatus/applic]', 'x'), ['{"examples": []}']);
+  check('ROOT /pm[pmStatus/applic]: as today (the LLM is asked)', predicate.asked.length === 1, predicate.asked.length);
+  const cond = await generate(sor('/ddn or /dml', 'x'), ['{"examples": []}']);
+  check('ROOT a condition /ddn or /dml: as today (the LLM is asked)', cond.asked.length === 1, cond.asked.length);
+  // A root that is not a root (/para): as today.
+  const notRoot = await generate(sor('/para', 'x'), ['{"examples": []}']);
+  check('ROOT /para (not a document root): as today', notRoot.asked.length === 1 || notRoot.result?.status !== 'ready', JSON.stringify(notRoot.result?.status));
+  // R is the root of every schema: review, "rejects every document type".
+  const onlyDm = { ...graph, roots: Object.fromEntries(graph.schemas.filter((s) => graph.roots[s][0] === 'dmodule').map((s) => [s, ['dmodule']])) };
+  onlyDm.skeletons = Object.fromEntries(Object.entries(graph.skeletons).filter(([s]) => onlyDm.roots[s]));
+  const all = await generateRuleTestExamples({
+    ruleXml: sor('//dmodule', 'x'), format: F, standard: S42, schemaLocation: 'flat', brdp: brdp('X'), vocabulary, parseXml, ...fetchers,
+    fetchSchemaGraph: async () => onlyDm, ruleDescription: 'd', askProposalCheck: async () => { throw new Error('no'); }, ask: async () => { throw new Error('no'); },
+  });
+  const allVerdict = ruleTestVerdict(all.examples, all.runs, null, all.proposalCheck, null, all.coverage);
+  check('ROOT every schema has root R: review, rejects every document type', allVerdict.kind === 'review' && allVerdict.rootAll === true && all.examples.every((e) => e.expected === 'reject'), JSON.stringify(allVerdict));
+  check('ROOT every schema: reason text ES', formatRuleTestReason(verdictToTestRecord(allVerdict).reason, es).includes('rechaza'), formatRuleTestReason(verdictToTestRecord(allVerdict).reason, es));
+}
+{
+  // S1000D 3.0.1: /comment (root comment), objappl 0.
+  const g301 = schemaGraph('S1000D 3.0.1');
+  const asked = [];
+  const r = await generateRuleTestExamples({
+    ruleXml: '<objrule><objpath objappl="0">/comment</objpath><objuse>Comments are not used.</objuse></objrule>', format: 'BREX-3.0.1', standard: 'S1000D 3.0.1', schemaLocation: 'flat',
+    brdp: brdp('X'), vocabulary: null, parseXml, fetchSchemaCards: async () => ({ cards: {}, document_schemas: g301.schemas }),
+    fetchStructure: async () => ({ available: false }), fetchSchemaGraph: async () => g301, ruleDescription: 'd',
+    askProposalCheck: async () => { asked.push('pc'); return '{}'; }, ask: async () => { asked.push('ask'); return '{}'; },
+  });
+  const v = ruleTestVerdict(r.examples, r.runs, null, r.proposalCheck, null, r.coverage);
+  check('ROOT 3.0.1 /comment: no LLM call, comment rejected, descript accepted, correct',
+    asked.length === 0 && r.examples.map((e, i) => `${e.schema}:${e.expected}:${r.runs[i].result.status}`).join() === 'comment:reject:rejected,descript:accept:accepted' && v.kind === 'correct',
+    JSON.stringify({ asked, ex: r.examples?.map((e, i) => [e.schema, e.expected, r.runs[i].result?.status]), v }));
+}
+
+// ─── Rules without these patterns: placement unchanged ──────────────────────
+{
+  const rules = [sor('//emphasis', 'x'), sor('//para[@id]', 'x'), sor('//internalRef[@internalRefId = "x"]', 'x'), sor('//dmStatus/@issueType', 'x')];
+  for (const rule of rules) {
+    const t = ruleTargets(rule);
+    check(`no pattern: ${rule.slice(0, 80)}`, t.references.length === 0 && t.chains.length === 0 && t.looseAttributes.length === 0 && t.relations.length === 0);
+  }
+}
+
+// ─── Remates: one sentence for a path anchored at another root ─────────────
+// EXT-00112 (ddn context, /dmodule/…) when the test is prepared, and a
+// minimal ddn document the engine runs: the same sentence, never "fragment".
+{
+  const prepared = await generate(inContext('comment', sor('/dmodule/content//para', 'x')), []);
+  const engine = await generate(inContext('ddn', sor('/dmodule/identAndStatusSection/dmStatus/applic', 'x')), []);
+  const engineReason = engine.verdict?.reason || engine.result?.runs?.[0]?.result?.notExecutableReason;
+  check('WRONG ROOT prepared: not executable, no LLM', prepared.result?.status === 'not_executable' && prepared.asked.length === 0, JSON.stringify(prepared.result?.reason));
+  check('WRONG ROOT engine: not executable, no LLM', engine.verdict?.kind === 'not_executable' && engine.asked.length === 0, JSON.stringify(engine.verdict));
+  for (const [lang, t, comment, ddn] of [
+    ['EN', en, 'the rule looks at <dmodule>, which the examples cannot contain (in the comment schema the root is <comment>).', 'the rule looks at <dmodule>, which the examples cannot contain (in the ddn schema the root is <ddn>).'],
+    ['ES', es, 'la regla mira <dmodule>, que los ejemplos no pueden contener (en el esquema comment la raíz es <comment>).', 'la regla mira <dmodule>, que los ejemplos no pueden contener (en el esquema ddn la raíz es <ddn>).'],
+  ]) {
+    check(`WRONG ROOT prepared ${lang}`, formatRuleTestReason(prepared.result.reason, t) === comment, formatRuleTestReason(prepared.result.reason, t));
+    check(`WRONG ROOT engine ${lang}`, formatRuleTestReason(engineReason, t) === ddn, formatRuleTestReason(engineReason, t));
+    check(`WRONG ROOT never "fragment" ${lang}`, !/fragment/i.test(formatRuleTestReason(engineReason, t) + formatRuleTestReason({ code: 'absolute_root', params: { name: 'dmodule', root: 'table' } }, t)));
+  }
+}
+
+console.log(`${passed} passed, ${failed} failed`);
+if (failed) process.exit(1);

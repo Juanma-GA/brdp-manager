@@ -1,0 +1,673 @@
+// The network-free part of scripts/run-project-rule-tests.mjs
+// (scripts/lib/projectRuleTests.mjs): options, project, which rules, which
+// are skipped, which go to Draft, the run folder and the report; and the
+// pure pieces the script shares with the panel (ruleTestRequestBody,
+// generationOutcome, buildRequestBody).
+// Run: node scripts/test-project-rule-tests.mjs
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  attemptsLabel,
+  buildReport,
+  createSaveSchedule,
+  errorGoesToDraft,
+  errorKind,
+  findProject,
+  folderSlug,
+  fromStartLine,
+  relaunchCommand,
+  resolveFrom,
+  similarIdentifiers,
+  formatDuration,
+  latestEntries,
+  loadResults,
+  matchesOnly,
+  parseArgs,
+  planRules,
+  progressLine,
+  removeLeftoverTmp,
+  RENAME_RETRY_DELAYS_MS,
+  runDir,
+  savedDirectLine,
+  saveFailedLine,
+  shouldRepeat,
+  shouldRevoke,
+  knownNotExecutable,
+  skipReason,
+  SKIPPED_SAVE_EVERY,
+  writeFileAtomic,
+} from './lib/projectRuleTests.mjs';
+import { ruleTestRequestBody } from '../src/api/ruleTestRequest.js';
+import { answerContent, buildRequestBody } from '../src/api/llmRequest.js';
+import { generationOutcome, notExecutableRecord } from '../src/utils/ruleTestOutcome.js';
+import { ruleXmlHash } from '../src/utils/ruleHash.js';
+import { createEvalClient, isSocketError } from './prompt-eval/session.mjs';
+
+let checks = 0;
+let failures = 0;
+function check(name, ok, detail = '') {
+  checks += 1;
+  if (!ok) {
+    failures += 1;
+    console.error(`FAIL ${name}${detail ? ` -- ${detail}` : ''}`);
+  }
+}
+const eq = (name, got, want) => check(name, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+
+// ── Options ──
+eq('only project', parseArgs(['--project', 'P']), { project: 'P', all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false, from: null });
+eq('all options', parseArgs(['--project', 'P', '--all', '--only', 'EXT-00041, EXT-00107', '--limit', '5', '--parallel', '2', '--lang', 'en']), {
+  project: 'P',
+  all: true,
+  only: ['EXT-00041', 'EXT-00107'],
+  limit: 5,
+  parallel: 2,
+  lang: 'en',
+  noRetry: false,
+  from: null,
+});
+check('--no-retry', parseArgs(['--project', 'P', '--no-retry']).noRetry === true);
+check('project required', /--project/.test(parseArgs(['--all']).error || ''));
+check('parallel at most 2', /--parallel/.test(parseArgs(['--project', 'P', '--parallel', '3']).error || ''));
+check('limit whole number', /--limit/.test(parseArgs(['--project', 'P', '--limit', '0']).error || ''));
+check('unknown option', /unknown option/.test(parseArgs(['--project', 'P', '--force']).error || ''));
+check('value missing', /needs a value/.test(parseArgs(['--project']).error || ''));
+
+// ── Project: exact name only; otherwise the similar ones ──
+const projects = [
+  { name: 'Official Default CMP ATA - 1000BR 4.2' },
+  { name: 'Official Default CMP ATA - 1000BR 4.1' },
+  { name: 'Lufthansa Technik AG - CMM' },
+  { name: 'Demo Project (S1000D 4.2)' },
+];
+check('exact match', findProject(projects, 'Official Default CMP ATA - 1000BR 4.2').project?.name === 'Official Default CMP ATA - 1000BR 4.2');
+const partial = findProject(projects, 'Official Default');
+check('partial name: no project', !partial.project);
+eq('partial name: similar listed', partial.similar, ['Official Default CMP ATA - 1000BR 4.1', 'Official Default CMP ATA - 1000BR 4.2']);
+eq('case and accents only differ: similar, never chosen', findProject(projects, 'demo project (s1000d 4.2)').similar, ['Demo Project (S1000D 4.2)']);
+eq('nothing similar', findProject(projects, 'zzz').similar, []);
+
+// ── Which rules ──
+check('--only short form', matchesOnly('BRDP-EXT-00041', ['EXT-00041']));
+check('--only full form', matchesOnly('BRDP-EXT-00041', ['brdp-ext-00041']));
+check('--only no partial number', !matchesOnly('BRDP-EXT-000410', ['EXT-00041']));
+const brdps = [
+  { id: 'b3', identifier: 'BRDP-EXT-00107' },
+  { id: 'b1', identifier: 'BRDP-EXT-00041' },
+  { id: 'b2', identifier: 'BRDP-EXT-0009' },
+  { id: 'b4', identifier: 'BRDP-S1-00001' },
+  { id: 'b5', identifier: 'BRDP-EXT-00200' },
+];
+const approvals = [
+  { brdp_id: 'b1', status: 'approved', rule_xml: '<x/>' },
+  { brdp_id: 'b2', status: 'pending_review', rule_xml: '<y/>' },
+  { brdp_id: 'b3', status: 'approved', rule_xml: '<z/>' },
+  { brdp_id: 'b4', status: 'pending_review', rule_xml: '   ' },
+  { brdp_id: 'gone', status: 'approved', rule_xml: '<trash/>' },
+];
+const plan = planRules(brdps, approvals);
+eq('ordered by ID, numbers as numbers', plan.queue.map((q) => q.brdp.identifier), ['BRDP-EXT-0009', 'BRDP-EXT-00041', 'BRDP-EXT-00107']);
+eq('BRDPs without a saved rule counted apart (empty rule and no row)', plan.withoutRule, 2);
+check('a rule of a BRDP in the Trash is never tested', !plan.queue.some((q) => q.brdp.id === 'gone'));
+const onlyPlan = planRules(brdps, approvals, { only: ['EXT-00041', 'EXT-99999'] });
+eq('--only filters', onlyPlan.queue.map((q) => q.brdp.identifier), ['BRDP-EXT-00041']);
+eq('--only without a match is reported', onlyPlan.unmatchedOnly, ['EXT-99999']);
+
+// ── Skipped: last test passed on the SAME rule ──
+eq('passed and up to date → skipped', skipReason({ last_test_result: 'passed', last_test_up_to_date: true }), 'passed');
+eq('rule edited after it passed → tested', skipReason({ last_test_result: 'passed', last_test_up_to_date: false }), null);
+eq('failed → tested again (relaunch)', skipReason({ last_test_result: 'failed', last_test_up_to_date: true }), null);
+eq('never tested → tested', skipReason({ last_test_result: null, last_test_up_to_date: null }), null);
+eq('--all tests a passed one', skipReason({ last_test_result: 'passed', last_test_up_to_date: true }, { all: true }), null);
+
+// ── Draft: a Verified rule that does not pass ──
+for (const r of ['failed', 'review', 'inconclusive', 'not_executable', 'error']) {
+  check(`Verified ${r} → Draft`, shouldRevoke(r, 'approved'));
+  check(`Draft ${r} → stays Draft`, !shouldRevoke(r, 'pending_review'));
+  check(`To Do ${r} → untouched`, !shouldRevoke(r, null));
+}
+check('Verified passed → stays Verified', !shouldRevoke('passed', 'approved'));
+check('Verified schema_covered → stays Verified', !shouldRevoke('schema_covered', 'approved'));
+check('Draft that passes → never promoted (nothing to revoke)', !shouldRevoke('passed', 'pending_review'));
+check('a record object is read too', shouldRevoke({ result: 'review' }, 'approved') && !shouldRevoke({ result: 'passed' }, 'approved'));
+check('no result → nothing', !shouldRevoke(null, 'approved') && !shouldRevoke('skipped', 'approved'));
+// Which errors count against the rule (Draft, no test recorded).
+check('AI timeout → Draft', errorGoesToDraft('POST /api/llm-proxy -> 504: {"code":"llm_timeout","seconds":2}'));
+check('unusable AI answer → Draft', errorGoesToDraft('The answer is not valid JSON: Unexpected token'));
+check('answer cut by length → Draft', errorGoesToDraft('the AI answer was cut by its length limit'));
+check('Proposal check not made → Draft', errorGoesToDraft('the Proposal check could not be made: timeout'));
+check('another endpoint of the backend → not the rule', !errorGoesToDraft('GET /api/schema-cards/structure?standard=x -> 500: {}'));
+check('backend not reachable → not the rule', !errorGoesToDraft('fetch failed'));
+eq('timeout recognised', errorKind('POST /api/llm-proxy -> 504: {"code":"llm_timeout","seconds":2}'), 'timeout');
+eq('other errors as they are', errorKind('bad JSON'), 'bad JSON');
+
+// ── What is recorded: the same function as the panel ──
+eq('not executable at all: the analysis is the record', notExecutableRecord({ status: 'not_executable', reason: { code: 'external_document', params: { fn: 'collection' } } }), {
+  result: 'not_executable',
+  reason: { code: 'external_document', params: { fn: 'collection' } },
+});
+eq('executable: no record from the analysis', notExecutableRecord({ status: 'executable' }), null);
+eq('an error records nothing', generationOutcome({ status: 'error', error: 'x' }, {}).record, null);
+eq('a replaced generation records nothing', generationOutcome(null, {}).record, null);
+eq('impossible path → review', generationOutcome({ status: 'path_review', reason: { code: 'test_impossible_path', params: {} } }, {}).record, {
+  result: 'review',
+  reason: { code: 'test_impossible_path', params: {} },
+});
+eq('late not executable', generationOutcome({ status: 'not_executable', reason: { code: 'unreachable_target', params: {} } }, {}).record.result, 'not_executable');
+
+// ── The request bodies the panel sends ──
+const passedRecord = { result: 'passed', reason: null, passedTest: { proposal: 'P', examples: [] } };
+eq('test body (passed keeps its examples, never keep_previous)', ruleTestRequestBody('<r/>', passedRecord), {
+  result: 'passed',
+  reason: null,
+  rule_hash: ruleXmlHash('<r/>'),
+  passed_test: { proposal: 'P', examples: [] },
+});
+check('failed body has no passed_test', !('passed_test' in ruleTestRequestBody('<r/>', { result: 'failed', reason: { code: 'test_incorrect', params: {} }, passedTest: {} })));
+eq('chat body (OpenAI-like)', buildRequestBody('mistral', [{ role: 'user', content: 'u' }], 'S', 0.5, 16000), {
+  max_tokens: 16000,
+  temperature: 0.5,
+  messages: [
+    { role: 'system', content: 'S' },
+    { role: 'user', content: 'u' },
+  ],
+});
+eq('chat body (Anthropic)', buildRequestBody('Anthropic', [{ role: 'user', content: 'u' }], 'S', 0), { max_tokens: 4000, temperature: 0, system: 'S', messages: [{ role: 'user', content: 'u' }] });
+eq('answer text', [answerContent('mistral', { choices: [{ message: { content: 'a' } }] }), answerContent('Anthropic', { content: [{ text: 'b' }] })], ['a', 'b']);
+
+// ── Progress line ──
+eq('duration', [formatDuration(12000), formatDuration(72000), formatDuration(3720000)], ['12 s', '1 min 12 s', '1 h 2 min']);
+eq('progress line of a failed Verified rule', progressLine(37, 461, { identifier: 'BRDP-EXT-00041', result: 'failed', moved_to_draft: true, duration_ms: 72000 }), '[37/461] BRDP-EXT-00041 FALLA → Draft (1 min 12 s)');
+eq('progress line of an error', progressLine(2, 9, { identifier: 'BRDP-X', result: 'error', error_kind: 'timeout', duration_ms: 3000 }), '[2/9] BRDP-X ERROR: TIMEOUT (3 s)');
+eq('progress line of a skipped rule', progressLine(3, 9, { identifier: 'BRDP-X', result: 'skipped' }), '[3/9] BRDP-X SALTADA');
+eq(
+  'progress line of an error moved to Draft',
+  progressLine(4, 9, { identifier: 'BRDP-X', result: 'error', error_kind: 'timeout', moved_to_draft: true, no_test_recorded: true, duration_ms: 3000 }),
+  '[4/9] BRDP-X ERROR: TIMEOUT → Draft (sin prueba registrada) (3 s)'
+);
+eq('progress line of a review moved to Draft', progressLine(5, 9, { identifier: 'BRDP-X', result: 'review', moved_to_draft: true, duration_ms: 1000 }), '[5/9] BRDP-X REVISAR → Draft (1 s)');
+check('revoke that failed is said', /a mano/.test(progressLine(1, 1, { identifier: 'X', result: 'failed', revoke_failed: 'HTTP 503', duration_ms: 1 })));
+
+// ── Folder (Windows-valid name, same project and day → same folder) ──
+eq('slug', folderSlug('Official Default CMP ATA - 1000BR 4.2'), 'Official-Default-CMP-ATA-1000BR-4.2');
+eq('slug drops characters Windows refuses', folderSlug('A/B: C*? "D" <E>|F.'), 'A-B-C-D-E-F');
+const day = new Date(2026, 9, 9, 23, 59);
+check('same day → same folder', runDir('base', 'P', day) === runDir('base', 'P', new Date(2026, 9, 9, 0, 1)));
+check('another day → another folder', runDir('base', 'P', day) !== runDir('base', 'P', new Date(2026, 9, 10)));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'project-rule-tests-'));
+eq('written', writeFileAtomic(path.join(tmp, 'resultados.json'), JSON.stringify({ entries: [1] })), { ok: true });
+eq('written and read back', loadResults(tmp), { entries: [1] });
+check('no temporary file left', !fs.existsSync(path.join(tmp, 'resultados.json.tmp')));
+eq('a folder without results', loadResults(path.join(tmp, 'none')), null);
+fs.writeFileSync(path.join(tmp, 'resultados.json.tmp'), 'half');
+fs.writeFileSync(path.join(tmp, 'informe.md.tmp'), 'half');
+eq('a .tmp left by an earlier pass is removed', removeLeftoverTmp(tmp), ['resultados.json.tmp', 'informe.md.tmp']);
+check('...and is gone', !fs.existsSync(path.join(tmp, 'resultados.json.tmp')) && !fs.existsSync(path.join(tmp, 'informe.md.tmp')));
+fs.rmSync(tmp, { recursive: true, force: true });
+
+// ── Saving with the file locked (Windows), simulated: no real Windows needed ──
+const lockError = (code) => Object.assign(new Error(`${code}: operation not permitted, rename 'resultados.json.tmp' -> 'resultados.json'`), { code });
+// A fake fs: files in a Map; renameSync / writeFileSync to the destination
+// fail as told.
+function fakeFs({ renameFails = 0, renameCode = 'EPERM', directFails = false } = {}) {
+  const files = new Map();
+  let renames = 0;
+  return {
+    files,
+    get renames() {
+      return renames;
+    },
+    existsSync: (f) => files.has(f),
+    unlinkSync: (f) => files.delete(f),
+    writeFileSync: (f, text) => {
+      if (directFails && !f.endsWith('.tmp')) throw lockError('EBUSY');
+      files.set(f, text);
+    },
+    renameSync: (from, to) => {
+      renames += 1;
+      if (renames <= renameFails) throw lockError(renameCode);
+      files.set(to, files.get(from));
+      files.delete(from);
+    },
+  };
+}
+const waits = [];
+const sleep = (ms) => waits.push(ms);
+const F = 'run/resultados.json';
+{
+  const f = fakeFs({ renameFails: 2 });
+  waits.length = 0;
+  eq('rename fails twice, then works → saved, no warning', writeFileAtomic(F, 'ALL', { fsImpl: f, sleep }), { ok: true });
+  eq('...the file is complete', f.files.get(F), 'ALL');
+  eq('...two growing waits', waits, [100, 150]);
+  check('...no .tmp left', !f.files.has(`${F}.tmp`));
+}
+for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+  const f = fakeFs({ renameFails: Infinity, renameCode: code });
+  waits.length = 0;
+  const res = writeFileAtomic(F, 'ALL', { fsImpl: f, sleep });
+  check(`${code}: rename always fails, direct write works → saved directly`, res.ok && res.direct && res.renameError === code, JSON.stringify(res));
+  eq(`${code}: ...10 retries, 100 ms to 2 s`, waits, RENAME_RETRY_DELAYS_MS);
+  eq(`${code}: ...11 attempts in all`, f.renames, 11);
+  eq(`${code}: ...the file is complete`, f.files.get(F), 'ALL');
+  check(`${code}: ...no .tmp left`, !f.files.has(`${F}.tmp`));
+}
+eq('the waits grow from 100 ms to about 2 s', [RENAME_RETRY_DELAYS_MS[0], RENAME_RETRY_DELAYS_MS.at(-1), RENAME_RETRY_DELAYS_MS.length], [100, 2000, 10]);
+{
+  const f = fakeFs({ renameFails: Infinity, directFails: true });
+  waits.length = 0;
+  let res;
+  let threw = false;
+  try {
+    res = writeFileAtomic(F, 'ALL', { fsImpl: f, sleep });
+  } catch {
+    threw = true;
+  }
+  check('everything fails → never thrown', !threw);
+  check('...the failure is returned', res && res.ok === false && res.code === 'EBUSY', JSON.stringify(res));
+  check('...no .tmp left after the failure', !f.files.has(`${F}.tmp`));
+  check('...the destination is not touched', !f.files.has(F));
+}
+{
+  const f = fakeFs({ renameFails: 1, renameCode: 'ENOSPC' });
+  waits.length = 0;
+  const res = writeFileAtomic(F, 'ALL', { fsImpl: f, sleep });
+  check('another error than a lock: no waiting, written directly', res.ok && res.direct && waits.length === 0, JSON.stringify(res));
+}
+{
+  // The lock goes away: the first save fails, the next one fixes the file.
+  const f = fakeFs({ renameFails: Infinity, directFails: true });
+  check('locked: first save fails', !writeFileAtomic(F, 'v1', { fsImpl: f, sleep: () => {} }).ok);
+  const unlocked = { ...f, writeFileSync: (file, text) => f.files.set(file, text), renameSync: (from, to) => (f.files.set(to, f.files.get(from)), f.files.delete(from)) };
+  eq('lock gone: next save works', writeFileAtomic(F, 'v1 v2', { fsImpl: unlocked, sleep: () => {} }), { ok: true });
+  eq('...the file is complete', f.files.get(F), 'v1 v2');
+}
+eq(
+  'the line said when a save fails',
+  saveFailedLine('C:/x/resultados.json', 'EPERM'),
+  'No se pudo guardar resultados.json (EPERM): cierra el fichero si lo tienes abierto; se reintenta tras la siguiente regla.'
+);
+check('...in English too', /^Could not save informe\.md \(EBUSY\): close the file/.test(saveFailedLine('informe.md', 'EBUSY', 'en')));
+check('the line said when saved directly', /resultados\.json guardado directamente: .*\(EPERM\)/.test(savedDirectLine('resultados.json', 'EPERM')));
+
+// ── Report ──
+const entries = [
+  { identifier: 'BRDP-EXT-00002', run: 'r1', result: 'passed', status_after: 'pending_review', lint: [] },
+  { identifier: 'BRDP-EXT-00001', run: 'r1', result: 'failed', moved_to_draft: true, status_after: 'pending_review', reason_text: 'La regla aceptó un ejemplo que debía rechazar.', lint: [{ kind: 'cannot reject', detail: 'flag 2 without values', known: false }] },
+  { identifier: 'BRDP-EXT-00003', run: 'r1', result: 'not_executable', status_after: 'approved', reason_text: 'Usa collection()', lint: [{ kind: 'not executable', detail: 'collection()', known: true }] },
+  { identifier: 'BRDP-EXT-00004', run: 'r1', result: 'error', error: 'timeout', status_after: 'approved', lint: [] },
+  { identifier: 'BRDP-EXT-00005', run: 'r1', result: 'passed', status_after: 'approved', lint: [] },
+  { identifier: 'BRDP-EXT-00006', run: 'r1', result: 'failed', moved_to_draft: false, revoke_failed: 'HTTP 503', status_after: 'approved', reason_text: 'falla', lint: [] },
+  // second pass, same day: skipped ones keep the earlier real result
+  { identifier: 'BRDP-EXT-00005', run: 'r2', result: 'skipped', status_after: 'approved' },
+  { identifier: 'BRDP-EXT-00004', run: 'r2', result: 'passed', status_after: 'approved', lint: [] },
+];
+entries.push(
+  { identifier: 'BRDP-EXT-00007', run: 'r1', result: 'failed', moved_to_draft: false, revoke_failed: 'HTTP 503', status_after: 'approved', lint: [] },
+  { identifier: 'BRDP-EXT-00007', run: 'r2', result: 'failed', moved_to_draft: true, status_after: 'pending_review', lint: [] },
+  { identifier: 'BRDP-EXT-00008', run: 'r1', result: 'failed', moved_to_draft: true, status_after: 'pending_review', lint: [] },
+  { identifier: 'BRDP-EXT-00008', run: 'r2', result: 'failed', status_after: 'pending_review', lint: [] },
+  { identifier: 'BRDP-EXT-00009', run: 'r2', result: 'skipped', status_after: 'pending_review' },
+  // Verified rules that do not pass: all to Draft
+  { identifier: 'BRDP-EXT-00010', run: 'r2', result: 'review', moved_to_draft: true, status_after: 'pending_review', reason_text: 'Revisar: la Propuesta', lint: [] },
+  { identifier: 'BRDP-EXT-00011', run: 'r2', result: 'inconclusive', moved_to_draft: true, status_after: 'pending_review', reason_text: 'nada seleccionado', lint: [] },
+  { identifier: 'BRDP-EXT-00012', run: 'r2', result: 'not_executable', moved_to_draft: true, status_after: 'pending_review', reason_text: 'Usa doc()', lint: [] },
+  { identifier: 'BRDP-EXT-00013', run: 'r2', result: 'error', error: 'POST /api/llm-proxy -> 504', moved_to_draft: true, no_test_recorded: true, status_after: 'pending_review', lint: [] },
+  { identifier: 'BRDP-EXT-00014', run: 'r2', result: 'error', error: 'GET /api/x -> 500', draft_skipped: 'backend_error', status_after: 'approved', lint: [] }
+);
+const latest = latestEntries(entries);
+const of = (id) => latest.find((e) => e.identifier === id);
+check('a failed revoke done by a later pass is no longer to do by hand', of('BRDP-EXT-00007').moved_to_draft && !of('BRDP-EXT-00007').revoke_failed);
+check('moved to Draft by an earlier pass of the folder stays so', of('BRDP-EXT-00008').moved_to_draft === true);
+eq('skipped never hides the earlier real result', latest.find((e) => e.identifier === 'BRDP-EXT-00005').result, 'passed');
+eq('a later real result replaces the earlier one', latest.find((e) => e.identifier === 'BRDP-EXT-00004').result, 'passed');
+eq('one line per rule, by ID', latest.map((e) => e.identifier), ['BRDP-EXT-00001', 'BRDP-EXT-00002', 'BRDP-EXT-00003', 'BRDP-EXT-00004', 'BRDP-EXT-00005', 'BRDP-EXT-00006', 'BRDP-EXT-00007', 'BRDP-EXT-00008', 'BRDP-EXT-00009', 'BRDP-EXT-00010', 'BRDP-EXT-00011', 'BRDP-EXT-00012', 'BRDP-EXT-00013', 'BRDP-EXT-00014']);
+const report = buildReport({ project: { name: 'P', standard: 'S1000D 4.2', format: 'BREX-4.2' }, without_rule: 3, runs: [{ started_at: 'a', finished_at: 'b', user: 'u@x', options: {} }], entries });
+const section = (title) => report.split('## ').find((s) => s.startsWith(title)) || '';
+check('totals: pasa 3, never to Draft', /\| pasa \| 3 \| — \|/.test(report), report);
+check('totals: falla 4, 3 to Draft', /\| falla \| 4 \| 3 \|/.test(report));
+check('totals: revisar 1 to Draft', /\| revisar \| 1 \| 1 \|/.test(report));
+check('totals: no concluyente 1 to Draft', /\| no concluyente \| 1 \| 1 \|/.test(report));
+check('totals: no ejecutable 2, 1 to Draft', /\| no ejecutable \| 2 \| 1 \|/.test(report));
+check('totals: error 2, 1 to Draft', /\| error \| 2 \| 1 \|/.test(report));
+check('totals: 7 moved to Draft in all', /\| total pasadas a Draft \| \| 7 \|/.test(report));
+check('the Draft criterion is said', /se prueba una vez más, con ejemplos nuevos/.test(report) && /Pasa a Draft si tampoco entonces da «pasa»/.test(report));
+check('BRDPs without a saved rule', /sin regla guardada \(no se prueban\): 3/.test(report));
+const notPassing = section('Reglas que no pasan');
+check('failing table first', report.indexOf('## Reglas que no pasan') < report.indexOf('## Pasan pero siguen en Draft'));
+check('failed rule with reason and lint', /BRDP-EXT-00001 \| falla \| → Draft \| La regla aceptó.* \| cannot reject: flag 2 without values \|/.test(notPassing), notPassing);
+check('known lint finding marked', /\(conocido\) not executable: collection\(\)/.test(notPassing));
+check('review → Draft in the table', /BRDP-EXT-00010 \| revisar \| → Draft \| Revisar/.test(notPassing));
+check('inconclusive → Draft in the table', /BRDP-EXT-00011 \| no concluyente \| → Draft \|/.test(notPassing));
+check('not executable → Draft in the table', /BRDP-EXT-00012 \| no ejecutable \| → Draft \|/.test(notPassing));
+check('error → Draft without a recorded test, and why', /BRDP-EXT-00013 \| error \| → Draft \(sin prueba registrada\) \| POST \/api\/llm-proxy -> 504 \|/.test(notPassing), notPassing);
+check('backend error → not to Draft, and why', /BRDP-EXT-00014 \| error \| no: error del backend, no de la regla \|/.test(notPassing));
+check('revoke failed: to do by hand', /BRDP-EXT-00006 \| falla \| NO: HTTP 503 \(hazlo a mano\)/.test(notPassing));
+check('passing rules are not in the failing table', !/BRDP-EXT-00002/.test(notPassing) && !/BRDP-EXT-00004/.test(notPassing));
+check('passes but still Draft', /- BRDP-EXT-00002/.test(section('Pasan pero siguen en Draft')) && !/BRDP-EXT-00005/.test(section('Pasan pero siguen en Draft')));
+check('a skipped Draft rule (it had passed) is in "passes but still Draft"', /- BRDP-EXT-00009 \(saltada: ya había pasado\)/.test(section('Pasan pero siguen en Draft')));
+check('passing list', /BRDP-EXT-00005 — Verified/.test(section('Pasan (')));
+check('English report', /## Rules that do not pass/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [], entries }, { lang: 'en' })));
+
+
+// ── Saving: every tested rule; skipped ones every 25, never several a second ──
+{
+  // 100 skipped rules in a row, 50 ms apart (two GETs on a fast backend).
+  let clock = 0;
+  const schedule = createSaveSchedule({ now: () => clock });
+  let saves = 1; // the save at the start
+  schedule.saved();
+  for (let i = 1; i <= 100; i += 1) {
+    clock += 50;
+    if (schedule.after({ result: 'skipped' }, { isLast: i === 100 })) {
+      saves += 1;
+      schedule.saved();
+    }
+  }
+  saves += 1; // the end always saves
+  check('100 skipped rules: at most 4-5 saves', saves <= 5, `${saves} saves`);
+  eq('every 25', SKIPPED_SAVE_EVERY, 25);
+  // So fast that 25 come in less than a second: never several saves a second.
+  clock = 0;
+  const fast = createSaveSchedule({ now: () => clock });
+  fast.saved();
+  const at = [];
+  for (let i = 1; i <= 200; i += 1) {
+    clock += 5;
+    if (fast.after({ result: 'skipped' })) {
+      at.push(clock);
+      fast.saved();
+    }
+  }
+  check('skipped saves at least 1 s apart', at.every((t, i) => t - (i ? at[i - 1] : 0) >= 1000), JSON.stringify(at));
+  // A tested rule always saves, and restarts the skipped count.
+  const mixed = createSaveSchedule({ now: () => (clock += 2000) });
+  mixed.saved();
+  check('a tested rule saves', mixed.after({ result: 'failed' }));
+  check('an error saves', mixed.after({ result: 'error' }));
+  mixed.saved();
+  let saved = 0;
+  for (let i = 0; i < 24; i += 1) if (mixed.after({ result: 'skipped' })) saved += 1;
+  check('24 skipped after a save: none saved', saved === 0);
+  check('the 25th skipped saves', mixed.after({ result: 'skipped' }));
+}
+
+// ── A cut connection: retried once (simulated fetch) ──
+{
+  const socketError = () => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
+  check('socket error: fetch failed / UND_ERR_SOCKET', isSocketError(socketError()));
+  check('socket error: ECONNRESET', isSocketError(Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })));
+  check('socket error: other side closed', isSocketError(new Error('other side closed')));
+  check('not a socket error: HTTP 500 text', !isSocketError(new Error('GET /api/x -> 500: {}')));
+  const ok = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const make = (failures) => {
+    let calls = 0;
+    const lines = [];
+    const fetchImpl = async (url) => {
+      calls += 1;
+      if (url.endsWith('/api/auth/login')) return ok({ access_token: 'tok' });
+      if (calls - 1 <= failures) throw socketError();
+      return ok({ answer: url.endsWith('llm-proxy') ? 'llm' : 'api' });
+    };
+    const client = createEvalClient({ api: 'http://x', email: 'e', password: 'p', fetchImpl, sleepImpl: async () => {}, log: (l) => lines.push(l) });
+    return { client, lines, calls: () => calls };
+  };
+  const once = make(1);
+  await once.client.login();
+  eq('fetch failed once: the API request is retried and answers', await once.client.apiFetch('/api/projects'), { answer: 'api' });
+  check('fetch failed once: 3 calls (login + 2)', once.calls() === 3, String(once.calls()));
+  check('fetch failed once: counted and said', once.client.socketRetries === 1 && once.lines.some((l) => /retrying once/.test(l)));
+  const llmOnce = make(1);
+  await llmOnce.client.login();
+  eq('fetch failed once: llm-proxy retried too', await llmOnce.client.llmProxy({}), { answer: 'llm' });
+  const twice = make(2);
+  await twice.client.login();
+  let err = null;
+  try {
+    await twice.client.apiFetch('/api/projects');
+  } catch (e) {
+    err = e;
+  }
+  check('fetch failed twice: an error', err && /fetch failed/.test(err.message));
+  check('fetch failed twice: a backend error, never Draft', err && !errorGoesToDraft(err.message));
+  const llmTwice = make(2);
+  await llmTwice.client.login();
+  let llmErr = null;
+  try {
+    await llmTwice.client.llmProxy({});
+  } catch (e) {
+    llmErr = e;
+  }
+  check('llm-proxy cut twice: not the rule (no Draft)', llmErr && !errorGoesToDraft(llmErr.message));
+}
+
+// ── Repeat once before Draft ──
+check('Verified fails → repeat', shouldRepeat({ result: 'failed' }, 'approved'));
+check('Verified review → repeat', shouldRepeat({ result: 'review' }, 'approved'));
+check('Verified inconclusive → repeat', shouldRepeat({ result: 'inconclusive' }, 'approved'));
+check('Verified AI timeout → repeat', shouldRepeat({ result: 'error', error: 'POST /api/llm-proxy -> 504: {"code":"llm_timeout"}' }, 'approved'));
+check('Verified passes → no repeat', !shouldRepeat({ result: 'passed' }, 'approved') && !shouldRepeat({ result: 'schema_covered' }, 'approved'));
+check('Verified not executable (known without the AI) → no repeat', !shouldRepeat({ result: 'not_executable', deterministic: true }, 'approved'));
+check('Verified impossible path (no AI) → no repeat', !shouldRepeat({ result: 'review', deterministic: true }, 'approved'));
+check('backend error → no repeat', !shouldRepeat({ result: 'error', error: 'GET /api/schema-cards -> 500: {}' }, 'approved') && !shouldRepeat({ result: 'error', error: 'fetch failed' }, 'approved'));
+check('Draft or To Do → one attempt', !shouldRepeat({ result: 'failed' }, 'pending_review') && !shouldRepeat({ result: 'failed' }, undefined));
+check('--no-retry → one attempt', !shouldRepeat({ result: 'failed' }, 'approved', { noRetry: true }));
+
+// ── Both results in the progress line and the report ──
+{
+  const repaired = { identifier: 'BRDP-EXT-00101', result: 'passed', status_before: 'approved', status_after: 'approved', duration_ms: 70000, attempts: [{ result: 'failed', recorded: false }, { result: 'passed', recorded: true }] };
+  const twiceBad = {
+    identifier: 'BRDP-EXT-00102',
+    result: 'failed',
+    reason_text: 'Prueba fallida.',
+    status_before: 'approved',
+    status_after: 'pending_review',
+    moved_to_draft: true,
+    duration_ms: 90000,
+    attempts: [{ result: 'inconclusive', recorded: false }, { result: 'failed', recorded: true }],
+  };
+  const timeouts = {
+    identifier: 'BRDP-EXT-00103',
+    result: 'error',
+    error: 'POST /api/llm-proxy -> 504',
+    error_kind: 'timeout',
+    status_before: 'approved',
+    status_after: 'pending_review',
+    moved_to_draft: true,
+    no_test_recorded: true,
+    duration_ms: 600000,
+    attempts: [{ result: 'error', error_kind: 'timeout' }, { result: 'error', error_kind: 'timeout' }],
+  };
+  eq('progress: fails, passes on repeat', progressLine(1, 3, repaired), '[1/3] BRDP-EXT-00101 FALLA, PASA al repetir (1 min 10 s)');
+  eq('progress: inconclusive, fails on repeat → Draft', progressLine(2, 3, twiceBad), '[2/3] BRDP-EXT-00102 NO CONCLUYENTE, FALLA al repetir → Draft (1 min 30 s)');
+  eq('progress: timeout twice → Draft without a test', progressLine(3, 3, timeouts), '[3/3] BRDP-EXT-00103 ERROR: TIMEOUT, ERROR: TIMEOUT al repetir → Draft (sin prueba registrada) (10 min 0 s)');
+  eq('progress in English', progressLine(1, 3, repaired, 'en'), '[1/3] BRDP-EXT-00101 FAILS, PASSES on repeat (1 min 10 s)');
+  eq('one attempt: one result', attemptsLabel({ result: 'failed' }), 'falla');
+  const report = buildReport({ project: { name: 'P', standard: 'S1000D 4.2', format: 'BREX-4.2' }, runs: [{ started_at: 'a', user: 'u', options: { no_retry: true } }], entries: [repaired, twiceBad, timeouts] });
+  check('report: repeated count', /Repetidas antes de pasar a Draft: 3 \(pasan al repetir: 1; no pasan tampoco al repetir: 2\)/.test(report), report);
+  check('report: both results in the failing table', /BRDP-EXT-00102 \| no concluyente, falla al repetir \| → Draft \|/.test(report));
+  check('report: passing list says it passed on repeat', /- BRDP-EXT-00101 — Verified \(falla, pasa al repetir\)/.test(report));
+  check('report: --no-retry in the pass line', /--no-retry/.test(report));
+  check('report: the final result is counted', /\| pasa \| 1 \|/.test(report) && /\| falla \| 1 \| 1 \|/.test(report));
+}
+
+// ─── Remates: a clean exit (Windows) ─────────────────────────────────────
+// On Windows, process.exit() while a fetch connection is still closing
+// aborts with "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file
+// src\win\async.c" after the message (a libuv check Linux does not have, so
+// it cannot be reproduced here). The scripts never call process.exit() with
+// connections open: the exit code is set, the HTTP client closed
+// (prompt-eval/session.mjs's exitCleanly) and the process ends by itself.
+// Checked two ways: no process.exit( left in the code (only the fallback of
+// exitCleanly, after the connections are closed), and the real script run
+// against a local keep-alive server, with process.exit trapped -- exit code,
+// one-line message, no trace, never process.exit().
+{
+  const { spawn } = await import('node:child_process');
+  const http = await import('node:http');
+  const { pathToFileURL, fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const codeOf = (file) =>
+    fs
+      .readFileSync(path.join(here, file), 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*\/\//.test(line))
+      .join('\n');
+  const exitsIn = (file) => (codeOf(file).match(/process\.exit\(/g) || []).length;
+  check('exit: run-project-rule-tests.mjs never calls process.exit()', exitsIn('run-project-rule-tests.mjs') === 0);
+  check('exit: run-prompt-eval.mjs never calls process.exit()', exitsIn('run-prompt-eval.mjs') === 0);
+  check('exit: session.mjs only in exitCleanly, after closing the client', exitsIn('prompt-eval/session.mjs') === 1 && /await closeHttpClient\(\{ abort \}\);\s*\n\s*setTimeout\(\(\) => process\.exit\(code\)/.test(codeOf('prompt-eval/session.mjs')));
+
+  const trapDir = fs.mkdtempSync(path.join(os.tmpdir(), 'exit-trap-'));
+  const trap = path.join(trapDir, 'trap.mjs');
+  fs.writeFileSync(trap, "const real = process.exit.bind(process);\nprocess.exit = (code) => { process.stderr.write('PROCESS_EXIT_CALLED\\n'); real(code); };\n");
+  // A backend that answers with keep-alive connections, like uvicorn.
+  const server = http.createServer((req, res) => {
+    const json = (body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'keep-alive' });
+      res.end(JSON.stringify(body));
+    };
+    if (req.url === '/api/auth/login') return json({ access_token: 'token' });
+    if (req.url === '/api/auth/me') return json({ email: 'editor@example.com' });
+    if (req.url === '/api/projects') return json([{ id: 'p1', name: 'Another project', standard: 'S1000D 4.2', effective_role: 'editor', project_config: {} }, { id: 'p2', name: 'Viewer project', standard: 'S1000D 4.2', effective_role: 'viewer', project_config: {} }]);
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const api = `http://127.0.0.1:${server.address().port}`;
+  const runScript = (args, env) =>
+    new Promise((resolve) => {
+      const child = spawn(process.execPath, ['--import', pathToFileURL(trap).href, path.join(here, 'run-project-rule-tests.mjs'), ...args], {
+        env: { ...process.env, PROMPT_EVAL_API_URL: api, PROMPT_EVAL_EMAIL: 'editor@example.com', PROMPT_EVAL_PASSWORD: 'x', ...env },
+      });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (out += d));
+      const killer = setTimeout(() => child.kill(), 30000);
+      child.on('close', (code) => {
+        clearTimeout(killer);
+        resolve({ code, out });
+      });
+    });
+  const noTrace = (out) => !/\n\s+at /.test(out) && !/Assertion failed/.test(out);
+  const missing = await runScript(['--project', 'Does not exist']);
+  check('exit: project not found -> message, exit 2, no process.exit, no trace', missing.code === 2 && /No project is named exactly "Does not exist"/.test(missing.out) && !/PROCESS_EXIT_CALLED/.test(missing.out) && noTrace(missing.out), missing.out);
+  const viewer = await runScript(['--project', 'Viewer project']);
+  check('exit: no editor role -> exit 2, no process.exit', viewer.code === 2 && /need the editor role/.test(viewer.out) && !/PROCESS_EXIT_CALLED/.test(viewer.out) && noTrace(viewer.out), viewer.out);
+  const noArgs = await runScript([]);
+  check('exit: no --project -> exit 2, no process.exit', noArgs.code === 2 && /--project/.test(noArgs.out) && !/PROCESS_EXIT_CALLED/.test(noArgs.out), noArgs.out);
+  server.close();
+  const down = await runScript(['--project', 'x']);
+  check('exit: backend down -> exit 2, no process.exit, no trace', down.code === 2 && /Cannot reach the backend/.test(down.out) && !/PROCESS_EXIT_CALLED/.test(down.out) && noTrace(down.out), down.out);
+  fs.rmSync(trapDir, { recursive: true, force: true });
+}
+
+// ── Rangos de valores, Part 2: known "not executable" keeps Verified ─────
+{
+  const { analyzeRule } = await import('../src/utils/ruleTestEngine.js');
+  const { DOMParser } = await import('@xmldom/xmldom');
+  const parseXml = (text) => new DOMParser().parseFromString(text, 'text/xml');
+  const DEFAULT = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/default-brex-4-2.json', import.meta.url))).rules;
+  const recordOf = (n) => notExecutableRecord(analyzeRule(DEFAULT[`BRDP-EXT-${n}`].rule_xml, 'BREX-4.2', { parseXml }));
+  const r261 = recordOf('00261');
+  check('EXT-00261 (only nonContextRule): not executable, non_context_rule', r261?.result === 'not_executable' && r261.reason?.code === 'non_context_rule', JSON.stringify(r261));
+  check('EXT-00261 Verified: known reason → stays Verified', knownNotExecutable(r261) && !shouldRevoke(r261, 'approved'));
+  // EXT-00200: the "(\\ )+" pattern fails when the rule runs on an example
+  // (xpath_error, FORX0002) -- the result "not executable" the real run gave.
+  const { runRuleOnFragment } = await import('../src/utils/ruleTestEngine.js');
+  const run200 = runRuleOnFragment(DEFAULT['BRDP-EXT-00200'].rule_xml, 'BREX-4.2', '<dmodule><content><x crewStepCondition="csc01"/></content></dmodule>', null, { parseXml });
+  const r200 = { result: 'not_executable', reason: run200.notExecutableReason };
+  check('EXT-00200 (pattern "(\\ )+"): not executable (xpath_error), not a known reason', run200.status === 'not_executable' && r200.reason?.code === 'xpath_error' && !knownNotExecutable(r200), JSON.stringify(run200).slice(0, 300));
+  check('EXT-00200 Verified → Draft as before', shouldRevoke(r200, 'approved'));
+  for (const reason of [{ code: 'external_document', params: { fn: 'doc-available()' } }, { code: 'external_placeholder', params: { placeholder: '@@URI@@' } }]) {
+    check(`known ${reason.code} → stays Verified`, !shouldRevoke({ result: 'not_executable', reason }, 'approved'));
+  }
+  check('parts all known → stays Verified', !shouldRevoke({ result: 'not_executable', reason: { code: 'parts', params: { parts: [{ ruleId: 'a', reason: { code: 'non_context_rule' } }, { ruleId: 'b', reason: { code: 'external_document', params: { fn: 'doc()' } } }] } } }, 'approved'));
+  check('parts with one unknown → Draft', shouldRevoke({ result: 'not_executable', reason: { code: 'parts', params: { parts: [{ ruleId: 'a', reason: { code: 'non_context_rule' } }, { ruleId: 'b', reason: { code: 'xpath_error', params: { message: 'x' } } }] } } }, 'approved'));
+  check('absolute root (impossible root) → Draft', shouldRevoke({ result: 'not_executable', reason: { code: 'unreachable_target', params: { names: '<pmStatus>' } } }, 'approved'));
+  check('a bare "not_executable" (no reason) → Draft', shouldRevoke('not_executable', 'approved'));
+  check('known reason never repeated (deterministic)', shouldRepeat({ ...r261, deterministic: true }, 'approved') === false);
+  const known = { identifier: 'BRDP-EXT-00261', result: 'not_executable', reason: r261.reason, reason_text: 'This rule part is a nonContextRule: there is no XPath to run.', known_not_executable: true, status_before: 'approved', status_after: 'approved' };
+  const invalid = { identifier: 'BRDP-EXT-00200', result: 'not_executable', reason: r200.reason, reason_text: 'XPath error', moved_to_draft: true, status_before: 'approved', status_after: 'pending_review' };
+  const rep = buildReport({ project: { name: 'Official Default S1000D 4.2 - 001', standard: 'S1000D 4.2', format: 'BREX-4.2' }, runs: [{ started_at: 'a', user: 'u', options: {} }], entries: [known, invalid] });
+  check('report: "Sin XPath que probar" lists EXT-00261, Verified', /## Sin XPath que probar \(1\): siguen como estaban\n\n- BRDP-EXT-00261 — Verified: /.test(rep), rep);
+  const notPassing = rep.split('## Reglas que no pasan')[1].split('## ')[0];
+  check('report: EXT-00261 not among the rules that do not pass', !notPassing.includes('BRDP-EXT-00261') && notPassing.includes('BRDP-EXT-00200'), notPassing);
+  check('report: totals say how many have no XPath to test', /de ellas, sin XPath que probar \(siguen como estaban\) \| 1 \| 0 \|/.test(rep), rep);
+  check('report EN: "No XPath to test"', /## No XPath to test \(1\): left as they were/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [], entries: [known] }, { lang: 'en' })));
+  check('progress: EXT-00261 says it stays as it was', progressLine(1, 2, known) === '[1/2] BRDP-EXT-00261 NO EJECUTABLE (sin XPath que probar: sigue como estaba) (0 s)', progressLine(1, 2, known));
+  check('progress: EXT-00200 → Draft', progressLine(2, 2, invalid) === '[2/2] BRDP-EXT-00200 NO EJECUTABLE → Draft (0 s)', progressLine(2, 2, invalid));
+}
+
+// ── --from: start at a rule (identifier) or at a position of [n/N] ──
+{
+  eq('--from with BRDP- → identifier', parseArgs(['--project', 'P', '--from', 'BRDP-EXT-02219']).from, { identifier: 'BRDP-EXT-02219' });
+  eq('--from bare number → position', parseArgs(['--project', 'P', '--from', '2219']).from, { position: 2219 });
+  eq('--from EXT-02219 (no BRDP-) → identifier', parseArgs(['--project', 'P', '--from', 'EXT-02219']).from, { identifier: 'EXT-02219' });
+  check('--from 0 → error', /--from 0/.test(parseArgs(['--project', 'P', '--from', '0']).error || ''));
+  eq('--from with --only → clear error (es)', parseArgs(['--project', 'P', '--from', '5', '--only', 'EXT-00041']).error, '--from y --only no se pueden usar juntas');
+  eq('--from with --only → clear error (en, either order)', parseArgs(['--only', 'EXT-00041', '--project', 'P', '--lang', 'en', '--from', '5']).error, '--from and --only cannot be used together');
+  const combo = parseArgs(['--project', 'P', '--from', 'BRDP-EXT-00010', '--all', '--limit', '50', '--parallel', '2', '--lang', 'en', '--no-retry']);
+  check('--from combines with --all, --limit, --parallel, --lang, --no-retry', !combo.error && combo.all && combo.limit === 50 && combo.parallel === 2 && combo.lang === 'en' && combo.noRetry && combo.from.identifier === 'BRDP-EXT-00010', JSON.stringify(combo));
+
+  const ids = Array.from({ length: 30 }, (_, i) => `BRDP-EXT-${String(i + 1).padStart(5, '0')}`);
+  const many = planRules(
+    ids.map((identifier, i) => ({ id: `id${i}`, identifier })),
+    ids.map((_, i) => ({ brdp_id: `id${i}`, status: 'approved', rule_xml: '<r/>' }))
+  ).queue;
+  const byId = resolveFrom(many, { identifier: 'BRDP-EXT-00012' });
+  eq('identifier → start, position, omitted', [byId.start, byId.identifier, byId.position, byId.omitted, byId.total], [11, 'BRDP-EXT-00012', 12, 11, 30]);
+  eq('identifier, any case', resolveFrom(many, { identifier: 'brdp-ext-00012' }).position, 12);
+  eq('identifier without BRDP-', resolveFrom(many, { identifier: 'EXT-00012' }).position, 12);
+  const byPos = resolveFrom(many, { position: 12 });
+  eq('position 12 = the 12th rule', [byPos.start, byPos.identifier, byPos.omitted], [11, 'BRDP-EXT-00012', 11]);
+  eq('first rule / position 1: nothing left out (as without --from)', [resolveFrom(many, { position: 1 }).omitted, resolveFrom(many, { identifier: 'BRDP-EXT-00001' }).start], [0, 0]);
+  const last = resolveFrom(many, { identifier: 'BRDP-EXT-00030' });
+  eq('last rule: only that one is left to test', many.slice(last.start).map((q) => q.brdp.identifier), ['BRDP-EXT-00030']);
+  const out = resolveFrom(many, { position: 31 });
+  check('position greater than N → error, nothing to test', !out.start && /posición fuera de rango.*\(1–30\)/.test(out.error || ''), out.error);
+  check('position 0 → error', /fuera de rango/.test(resolveFrom(many, { position: 0 }).error || ''));
+  const missing = resolveFrom(many, { identifier: 'BRDP-EXT-00031' }, { lang: 'en' });
+  check('unknown identifier → error (en)', /no saved rule of the project has that identifier\. Nothing was tested\./.test(missing.error || ''), missing.error);
+  check('unknown identifier → the similar ones (closest numbers)', missing.similar.includes('BRDP-EXT-00030') && missing.similar.includes('BRDP-EXT-00029') && missing.similar.length <= 8, JSON.stringify(missing.similar));
+  const typo = resolveFrom(many, { identifier: 'BRDP-EXR-00012' });
+  check('typo in the prefix → the same number is similar', typo.error && typo.similar.includes('BRDP-EXT-00012'), JSON.stringify(typo.similar));
+  const noRule = resolveFrom(many, { identifier: 'BRDP-S1-00001' }, { allIdentifiers: ['BRDP-S1-00001'] });
+  check('identifier of a BRDP without a saved rule → said so', /BRDP-S1-00001 no tiene regla guardada/.test(noRule.error || ''), noRule.error);
+  eq('similarIdentifiers: contained', similarIdentifiers(['BRDP-EXT-02219', 'BRDP-EXT-12219', 'BRDP-S1-00001'], '2219').slice(0, 2), ['BRDP-EXT-02219', 'BRDP-EXT-12219']);
+
+  // --from + --limit 50: the slice from --from, 50 of them.
+  const big = planRules(
+    Array.from({ length: 200 }, (_, i) => ({ id: `b${i}`, identifier: `BRDP-EXT-${String(i + 1).padStart(5, '0')}` })),
+    Array.from({ length: 200 }, (_, i) => ({ brdp_id: `b${i}`, status: 'approved', rule_xml: '<r/>' }))
+  ).queue;
+  const from100 = resolveFrom(big, { position: 100 });
+  eq('--from 100 --limit 50 → BRDP-EXT-00100 … BRDP-EXT-00149', [big.slice(from100.start).slice(0, 50)[0].brdp.identifier, big.slice(from100.start).slice(0, 50)[49].brdp.identifier], ['BRDP-EXT-00100', 'BRDP-EXT-00149']);
+
+  // Start line (ES/EN).
+  eq('start line ES', fromStartLine({ identifier: 'BRDP-EXT-02219', position: 2219, total: 2818, omitted: 2218 }), 'Empezando en BRDP-EXT-02219 (posición 2219 de 2818); se omiten las 2218 anteriores.');
+  eq('start line EN', fromStartLine({ identifier: 'BRDP-EXT-02219', position: 2219, total: 2818, omitted: 2218 }, 'en'), 'Starting at BRDP-EXT-02219 (position 2219 of 2818); the 2218 before it are left out.');
+  eq('start line, first rule', fromStartLine({ identifier: 'BRDP-EXT-00001', position: 1, total: 3, omitted: 0 }), 'Empezando en BRDP-EXT-00001 (posición 1 de 3); no se omite ninguna.');
+  eq('start line, one left out', fromStartLine({ identifier: 'BRDP-EXT-00002', position: 2, total: 3, omitted: 1 }), 'Empezando en BRDP-EXT-00002 (posición 2 de 3); se omite la anterior.');
+
+  // Report: the run line, the totals row, and how to go on.
+  const fromOpts = { from: { value: 'BRDP-EXT-02219', identifier: 'BRDP-EXT-02219', position: 2219, omitted: 2218, total: 2818 }, limit: 50, lang: 'es' };
+  const rep = buildReport({
+    project: { name: '8x8 MALE', standard: 'S1000D 3.0.1', format: 'BREX-3.0.1' },
+    runs: [{ started_at: 'a', user: 'u', options: fromOpts, stopped: '--limit 50' }],
+    entries: [{ identifier: 'BRDP-EXT-02219', run: 'a', result: 'passed', status_after: 'approved' }],
+    pending: ['BRDP-EXT-02269', 'BRDP-EXT-02270'],
+  });
+  check('report: run line names --from', /--from BRDP-EXT-02219/.test(rep), rep);
+  check('report: totals row «omitidas por --from: N»', /\| omitidas por --from \| 2218 \| — \|/.test(rep), rep);
+  check('report: earlier rules neither tested nor skipped', !/BRDP-EXT-02218/.test(rep) && /\| saltada \| 0 \|/.test(rep), rep);
+  check('report: how to go on, with --from at the first rule not tested', rep.includes('Cómo relanzar: `node scripts/run-project-rule-tests.mjs --project "8x8 MALE" --from BRDP-EXT-02269 --limit 50`'), rep);
+  const repNoFrom = buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [{ started_at: 'a', user: 'u', options: {} }], entries: [], pending: ['BRDP-EXT-00002'] }, { lang: 'en' });
+  check('report without --from: no totals row, relaunch without --from', !/left out by --from/.test(repNoFrom) && repNoFrom.includes('How to go on: `node scripts/run-project-rule-tests.mjs --project "P"`'), repNoFrom);
+  check('report EN totals row', /\| left out by --from \| 2218 \|/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [{ started_at: 'a', user: 'u', options: fromOpts }], entries: [] }, { lang: 'en' })));
+  eq('relaunch: --from given as a position, finished → the same position kept as its rule', relaunchCommand('P', { from: { value: 5, identifier: 'BRDP-EXT-00005' } }, []), 'node scripts/run-project-rule-tests.mjs --project "P" --from BRDP-EXT-00005');
+}
+
+console.log(`${checks - failures}/${checks} checks passed`);
+if (failures) process.exit(1);

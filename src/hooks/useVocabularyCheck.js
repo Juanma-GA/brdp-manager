@@ -1,0 +1,153 @@
+// Prompt-refactor round: vocabulary-check state/logic extracted out of
+// RecordsPage.jsx verbatim (no behavior change) -- the real schema
+// vocabulary for the project's standard (used synchronously by "Did you
+// mean" suggestions) plus the deterministic notFound/wrongType check
+// (used by the big red banner and, via recomputeVocabResult, injected
+// into Ask/Suggest's prompts).
+import { useEffect, useRef, useState } from 'react';
+import { fetchSchemaAttribute } from '../api/schemaFacts.js';
+import {
+  attributesToCheckOnElements,
+  checkAgainstVocabulary,
+  checkElementAttributePairs,
+  extractContextCandidates,
+  hashVocabInputText,
+  loadSchemaVocabulary,
+} from '../validation/schemaValidation.js';
+
+export function useVocabularyCheck(standard, selected) {
+  // Follow-up round ("sin falsos positivos"): the real schema vocabulary
+  // for this project's standard, loaded once and kept in state so the
+  // "Did you mean" suggestion (resolvePhraseCandidates, validation/schemaValidation.js)
+  // can be computed SYNCHRONOUSLY on every render of every field -- unlike
+  // the big red notice (recomputeVocabResult below), which only needs to
+  // run on selection/save and can afford to be async. `loadSchemaVocabulary`
+  // caches by file internally, so this is cheap even across many BRDPs of
+  // the same project.
+  const [vocabulary, setVocabulary] = useState(null);
+  // AACF 1, Part 2: a vocabulary that could not be loaded is said (the
+  // page shows it with Retry), never taken for "this standard has no
+  // vocabulary" -- that notice is only for a standard without one.
+  const [vocabularyLoadError, setVocabularyLoadError] = useState(null);
+  const [vocabularyReloadToken, setVocabularyReloadToken] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setVocabularyLoadError(null);
+    loadSchemaVocabulary(standard)
+      .then((v) => {
+        if (!cancelled) setVocabulary(v);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setVocabulary(null);
+        setVocabularyLoadError(err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [standard, vocabularyReloadToken]);
+
+  // Docs request (schema vocabulary check round), extended by the "aviso
+  // ligado al texto" round and by the "solo determinista" follow-up: the
+  // CURRENT check's result -- { brdpId, hash, available, notFound,
+  // wrongType } -- or null before anything has run yet. Guarded by
+  // `brdpId` at render time (never explicitly cleared on BRDP change) so a
+  // stale result from a PREVIOUS BRDP simply never displays once
+  // `selected` moves on. `hash` is the text (title+definition+proposal)
+  // this result reflects. Entirely deterministic now (no LLM call, no
+  // cache to invalidate) -- recomputeVocabResult is cheap enough to run on
+  // every selection change and every save, so the notice always reflects
+  // the BRDP's CURRENT text.
+  const [vocabResult, setVocabResult] = useState(null);
+
+  // Barrido final 2/2, Part 3: the elements that declare each attribute of a
+  // `<element/@attribute>` written in the text (GET /api/schema-cards/
+  // attribute), cached per standard and attribute for the page's life. A
+  // failed read is not cached (the next check tries again) and leaves that
+  // pair "unchecked", which the banner says.
+  const ownersCacheRef = useRef(new Map());
+  const loadOwners = async (attributes) => {
+    const out = new Map();
+    await Promise.all(
+      attributes.map(async (attribute) => {
+        const key = `${standard}\u0000${attribute}`;
+        if (!ownersCacheRef.current.has(key)) {
+          try {
+            const res = await fetchSchemaAttribute(standard, attribute);
+            ownersCacheRef.current.set(key, res.available ? new Set((res.owners || []).map((o) => o.element)) : null);
+          } catch {
+            out.set(attribute, null);
+            return;
+          }
+        }
+        out.set(attribute, ownersCacheRef.current.get(key));
+      }),
+    );
+    return out;
+  };
+
+  // "Aviso ligado al texto" round, point 1, simplified by the "solo
+  // determinista" follow-up: the vocabulary check (context extraction +
+  // comparison against the real schema, no LLM call anywhere) -- fast
+  // enough to run on every selection change and every save, so the notice
+  // always reflects the BRDP's CURRENT text. Also called from
+  // askGeneric/requestSuggestion BEFORE building their system prompt, so
+  // the unknown-names block (if any) can be included in that same call --
+  // there is now only ONE vocabulary-check function, used everywhere.
+  // The owners lookup makes the check wait on the network: only the latest
+  // call may set the result (an older one finishing later would show a
+  // banner for text that has since changed).
+  const recomputeSeqRef = useRef(0);
+  const recomputeVocabResult = async (brdp) => {
+    const seq = ++recomputeSeqRef.current;
+    if (!brdp) {
+      setVocabResult(null);
+      return null;
+    }
+    const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
+    let loadFailed = false;
+    const vocab = await loadSchemaVocabulary(standard).catch(() => {
+      loadFailed = true;
+      return null;
+    });
+    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
+    const checked = checkAgainstVocabulary(contextCandidates, vocab);
+    const pairs = contextCandidates.elementAttributePairs;
+    const toCheck = attributesToCheckOnElements(pairs, vocab);
+    const pairCheck = checkElementAttributePairs(pairs, vocab, toCheck.length ? await loadOwners(toCheck) : new Map());
+    const result = {
+      brdpId: brdp.id,
+      hash,
+      available: checked.available,
+      loadFailed,
+      notFound: checked.notFound,
+      wrongType: checked.wrongType,
+      typedNotFound: checked.typedNotFound,
+      notOnElement: pairCheck.notOnElement,
+      pairsUnchecked: pairCheck.unchecked,
+    };
+    if (seq === recomputeSeqRef.current) setVocabResult(result);
+    return result;
+  };
+
+  // "Aviso ligado al texto" round, point 1: the deterministic vocabulary
+  // check reflects whichever BRDP just became selected as soon as it's
+  // selected -- never requiring an Ask/Suggest click first (a BRDP whose
+  // Title already has, say, <cocacola> shows the notice, and its Suggest
+  // buttons are already blocked, the moment it's opened).
+  useEffect(() => {
+    recomputeVocabResult(selected);
+    // Only a change of BRDP: an edit recomputes from handleUpdate after the
+    // save (RecordsPage), so re-running here on every keystroke would check
+    // text that is not saved yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
+  // Retry: loads the vocabulary again, then the notice of the selected BRDP.
+  const retryVocabularyLoad = () => {
+    setVocabularyReloadToken((n) => n + 1);
+    recomputeVocabResult(selected);
+  };
+
+  return { vocabulary, vocabResult, recomputeVocabResult, vocabularyLoadError, retryVocabularyLoad };
+}

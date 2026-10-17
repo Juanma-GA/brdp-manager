@@ -1,0 +1,230 @@
+{
+ "source": "DMC-S1000D-F-04-10-0301-00A-022A-D_001-00_EN-US.XML (s1kd-tools, tools/s1kd-brexcheck/brex): the default S1000D 4.2 BREX. Candidates as AI Extract reads them; EXT-n is the n-th candidate, as the project «Official Default S1000D 4.2 - 001» numbers them.",
+ "rules": {
+  "BRDP-EXT-00002": {
+   "source_identifier": "BREX-S1-00002",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00002\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//dmlEntry</objectPath>\n\t\t\t\t\t\t<objectUse>The DMRL must contain the titles and details of the responsible partner company for each of the data modules and publication modules - with some exceptions (Chap 4.5, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00003": {
+   "source_identifier": "BREX-S1-00003",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00003\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//dmlEntry</objectPath>\n\t\t\t\t\t\t<objectUse>The DMRL does not contain the issue information of its contained objects, unless under certain circumstances (Chap 4.5, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00009": {
+   "source_identifier": "BREX-S1-00009",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00009\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//dmlCode/@seqNumber</objectPath>\n\t\t\t\t\t\t<objectUse>The sequential number in the DML identity should start at 00001 (Chap 4.5, Para 5.1 and Para 5.2).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00010": {
+   "source_identifier": "BREX-S1-00010",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comment.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00010\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//commentCode/@seqNumber</objectPath>\n\t\t\t\t\t\t<objectUse>The sequential number in the Comment identity should start at 00001 (Chap 4.6.1, Para 2.1.1.1.4).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00011": {
+   "source_identifier": "BREX-S1-00011",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comment.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00011\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//commentRefs</objectPath>\n\t\t\t\t\t\t<objectUse>For a comment related to a data module instance identified by the use of the data module code extension, the reference must include the element identExtension contained in element dmRef within this block of references. (Chap 4.6.1, Para 2.2.3).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00014": {
+   "source_identifier": "BREX-S1-00022",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00022\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"0A1\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::enterpriseSpec or descendant::toolSpec or descendant::supplySpec or descendant::controlIndicatorSpec or descendant::supplyRqmtSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::partIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only functionalPhysicalAreaSpec, functionalPhysicalAreaIdent, applicIdent, applicRefIdent, applic, applicRef, figure, figureIdent, multimedia, multimediaIdent elements can be used in the Data update file representing the functional physical area CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00017": {
+   "source_identifier": "BREX-S1-00017",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00017\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00F\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::toolSpec or descendant::enterpriseSpec or descendant::supplySpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::partIdent or descendant::functionalItemIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only circuitBreakerSpec, circuitBreakerIdent, applicIdent, applicRefIdent, applic, applicRef, figure, figureIdent, multimedia, multimediaIdent elements can be used in the Data update file representing the CB CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00018": {
+   "source_identifier": "BREX-S1-00014",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00014\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00G\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::functionalItemSpec or descendant::circuitBreakerSpec or descendant::accessPointSpec or descendant::toolSpec or descendant::enterpriseSpec or descendant::supplySpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only partSpec, partIdent, figure, figureIdent, multimedia, multimediaIdent, applic, applicIdent, applicRef and applicRefIdent elements can be used in the Data update file representing the part CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00019": {
+   "source_identifier": "BREX-S1-00015",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00015\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00H\" and ancestor::dataUpdateFile[descendant::update[descendant::partSpec or descendant::functionalItemSpec or descendant::circuitBreakerSpec or descendant::accessPointSpec or descendant::toolSpec or descendant::enterpriseSpec or descendant::supplySpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::partIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00020": {
+   "source_identifier": "BREX-S1-00018",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00018\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00J\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::toolSpec or descendant::enterpriseSpec or descendant::supplySpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::partIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only accessPointSpec, accessPointIdent, figure, figureIdent, multimedia, multimediaIdent, applic, applicRef, applicIdent, applicRefIdent elements can be used in the Data update file representing the access point CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00022": {
+   "source_identifier": "BREX-S1-00020",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00020\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00L\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::enterpriseSpec or descendant::toolSpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::partIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only supplySpec, supplyIdent, figure, figureIdent, multimedia, multimediaIdent, applic, applicRef, applicIdent, applicRefIdent elements can be used in the Data update file representing the supply CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00023": {
+   "source_identifier": "BREX-S1-00021",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00021\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00M\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::enterpriseSpec or descendant::toolSpec or descendant::supplySpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::partIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only supplyRqmtSpec, supplyRqmtIdent, applicIdent, applicRefIdent, applic, applicRef, figure, figureIdent, multimedia, multimediaIdent elements can be used in the Data update file representing the supply requirements CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00025": {
+   "source_identifier": "BREX-S1-00023",
+   "rule_xml": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00023\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00X\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::enterpriseSpec or descendant::toolSpec or descendant::supplySpec or descendant::functionalPhysicalAreaSpec or descendant::supplyRqmtSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::partIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only controlIndicatorSpec, controlIndicatorIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the control indicators CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00028": {
+   "source_identifier": "BREX-S1-00029",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00029\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//language</objectPath>\n\t\t\t\t\t\t<objectUse>Population of attribute countryIsoCode and attribute languageIsoCode should be in accordance with ISO 3166 and ISO 639, respectively (Chap 3.9.5.1, Para 2.1.1.2)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00030": {
+   "source_identifier": "BREX-S1-00031",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00031\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//@issueType</objectPath>\n\t\t\t\t\t\t<objectUse>Deletion of data modules is treated as a special case of update. The data module itself is not physically deleted from the CSDB but marked as deleted by setting the attribute issueType to the value /deleted/. (Chap 3.9.5.1, Para 2.2)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00033": {
+   "source_identifier": "BREX-S1-00034",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00034\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//dmodule[not(descendant-or-self::identAndStatusSection[descendant-or-self::reasonForUpdate]) and not(child::content[descendant-or-self::*[attribute::changeType or attribute::changeMark]]) and (child::identAndStatusSection[descendant-or-self::*[attribute::changeType or attribute::changeMark]]) and descendant-or-self::dmStatus[not(attribute::issueType=\"status\" or attribute::issueType=\"rinstate-status\")]]</objectPath>\n\t\t\t\t\t\t<objectUse>Data modules that have had their identification and status information updated must have the attribute issueType set to the value /status/ or, if the data module is reinstated, set to /rinstate-status/. (Chap 3.9.5.1, Para 2.2)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00037": {
+   "source_identifier": "BREX-S1-00039",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00039\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//reasonForUpdate</objectPath>\n\t\t\t\t\t\t<objectUse>If attribute updateHighlight is set to the value 1, this indicates that the reason for update must appear in the highlights data module. If the attribute is not used or its value is 0, it means that the reason for update must not appear in the highlights data module (Chap 3.9.5.2.1.1, Para 2.2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00038": {
+   "source_identifier": "BREX-S1-00040",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00040\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//*/changeInline</objectPath>\n\t\t\t\t\t\t<objectUse>The element /changeInline/ must not be used to indicate that a complete element has been inserted (or modified) (Chap 3.9.5.2.1.1, Para 2.4.2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00039": {
+   "source_identifier": "BREX-S1-00041",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00041\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//internalRef</objectPath>\n\t\t\t\t\t\t<objectUse>There must be no cross-references to deleted information in the data module (Chap 3.9.5.2.1.1, Para 2.4.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00040": {
+   "source_identifier": "BREX-S1-00042",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00042\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//dmRef</objectPath>\n\t\t\t\t\t\t<objectUse>There must be no references to deleted information in other data modules (Chap 3.9.5.2.1.1, Para 2.4.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00042": {
+   "source_identifier": "BREX-S1-00044",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00044\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//@changeMark</objectPath>\n\t\t\t\t\t\t<objectUse>Editorial changes must not be marked (Chap 3.9.5.2.1.1, Para 2.1.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00046": {
+   "source_identifier": "BREX-S1-00048",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00048\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt04\" and not(attribute::internalRefId = //supplyDescr/@id) and not(attribute::internalRefId = //embeddedSupplyDescr/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is a supply  can the value of attribute internalRefTargetType be irtt04 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00047": {
+   "source_identifier": "BREX-S1-00049",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2009-160MTDTT CPF2014-009IGBRTT-E\" changeType=\"modify\" changeMark=\"1\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00049\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt05\" and not(attribute::internalRefId = //supportEquipDescr/@id) and not (attribute::internalRefId = //embeddedSupportEquipDescr/@id) and not(attribute::internalRefId = //toolRef/@id) and not(attribute::internalRefId = //toolsListCode/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is support equipment can the value of attribute internalRefTargetType be irtt05 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00048": {
+   "source_identifier": "BREX-S1-00050",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00050\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt06\" and not(attribute::internalRefId = //spareDescr/@id) and not(attribute::internalRefId = //embeddedSpareDescr/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is a spare can the value of attribute internalRefTargetType be irtt06 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00050": {
+   "source_identifier": "BREX-S1-00052",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"BRWG89 CPF2014-009IGBRTT-E\" changeType=\"modify\" changeMark=\"1\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00052\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt08\" and not(attribute::internalRefId = //proceduralStep/@id or attribute::internalRefId = //proceduralStepAlts/@id or attribute::internalRefId = //isolationStep/@id or attribute::internalRefId = //isolationStepAlts/@id or attribute::internalRefId = //isolationProcedureEnd/@id or attribute::internalRefId = //isolationProcedureEndAlts/@id or attribute::internalRefId = //crewDrillStep/@id or attribute::internalRefId = //checkListStep/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is a step can the value of attribute internalRefTargetType be irtt08 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00055": {
+   "source_identifier": "BREX-S1-00057",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00057\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt14\" and not(attribute::internalRefId = //workLocation/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is a work location can the value of attribute internalRefTargetType be irtt14 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00056": {
+   "source_identifier": "BREX-S1-00058",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00058\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt15\" and not(@internalRefId=//sbMaterialSet/@id) and not(@internalRefId=//sbSupportEquipSet/@id) and not(@internalRefId=//sbIndividualSupportEquip/@id) and not(@internalRefId=//sbExternalSupportEquipSet/@id) and not(@internalRefId=//sbSupplySet/@id) and not(@internalRefId=//sbIndividualSupply/@id) and not(@internalRefId=//sbExternalSupplySet/@id) and not(@internalRefId=//sbSpareSet/@id) and not(@internalRefId=//sbIndividualSpare/@id) and not(@internalRefId=//sbExternalSpareSet/@id) and not(@internalRefId=//sbRemovedSpareSet/@id) and not(@internalRefId=//sbIndividualRemovedSpare/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is a Service Bulletin material set (including individual, external or removed material) can the value of attribute internalRefTargetType be irtt15 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00063": {
+   "source_identifier": "BREX-S1-00065",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00065\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//proceduralStep[descendant-or-self::sequentialList]</objectPath>\n\t\t\t\t\t\t<objectUse>Sequential lists must not be used to provide procedural step information. (Chap 3.9.5.2.1.3, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00064": {
+   "source_identifier": "BREX-S1-00066",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00066\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//sequentialList</objectPath>\n\t\t\t\t\t\t<objectUse>Only one sequential (ordered) list must be placed under a numbered title or paragraph (subheading) (Chap 3.9.5.2.1.3, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00066": {
+   "source_identifier": "BREX-S1-00068",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00068\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//table/title</objectPath>\n\t\t\t\t\t\t<objectUse>In procedural, process, crew and fault data modules, titles must be included for /figure/ and /table/ for formal tables. (Chap 3.9.5.2.1.5, Para 2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00077": {
+   "source_identifier": "BREX-S1-00077",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00077\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//levelledPara</objectPath>\n\t\t\t\t\t\t<objectUse>The depth of the /levelledPara/ structure is unlimited, however, it is recommended to not exceed five levels of depth (Chap 3.9.5.2.2, Para 2.4).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00079": {
+   "source_identifier": "BREX-S1-00079",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00079\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//proceduralStep</objectPath>\n\t\t\t\t\t\t<objectUse>It is highly discouraged to exceed five levels of depth for proceduralStep. (Chap 3.9.5.2.3, Para 2.4.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00115": {
+   "source_identifier": "BREX-S1-00114",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00114\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[child::frontMatterTitlePage[child::publisherLogo[attribute::id or attribute::authorityName or attribute::authorityDocument]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Attributes @id, @authorityName and @authorityDocument must not be used for element publisherLogo in a front matter data module (Chap 3.9.5.2.16, Para 2.3.1.14)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00123": {
+   "source_identifier": "BREX-S1-00122",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00122\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[descendant-or-self::dmRef[attribute::referredFragment]]</objectPath>\n\t\t\t\t\t\t<objectUse>References to other data modules from a front matter data module must be to data modules themselves, not to any specific part of them (Chap 3.9.5.2.16, Para 2.3.2.3.3)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00124": {
+   "source_identifier": "BREX-S1-00123",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00123\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[descendant-or-self::dmRef[attribute::id or attribute::authorityName or attribute::authorityDocument]]</objectPath>\n\t\t\t\t\t\t<objectUse>Attributes @id, @authorityName and @authorityDocument must not be used for  references to other data modules in a front matter data module (Chap 3.9.5.2.16, Para 2.3.2.3.3)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00127": {
+   "source_identifier": "BREX-S1-00126",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00126\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[descendant-or-self::pmRef[attribute::id or attribute::authorityName or attribute::authorityDocument]]</objectPath>\n\t\t\t\t\t\t<objectUse>Attributes @id, @authorityName and @authorityDocument must not be used for  references to publication modules in a front matter data module  (Chap 3.9.5.2.16, Para 2.3.2.3.4)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00130": {
+   "source_identifier": "BREX-S1-00129",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00129\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[descendant-or-self::externalPubRef[attribute::id or attribute::authorityName or attribute::authorityDocument]]</objectPath>\n\t\t\t\t\t\t<objectUse>Attributes @id, @authorityName and @authorityDocument must not be used for  references to external publications in a front matter data module  (Chap 3.9.5.2.16, Para 2.3.2.3.5)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00133": {
+   "source_identifier": "BREX-S1-00132",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00132\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//dmAddress[child::dmIdent[child::dmCode[attribute::infoCode=\"0A2\" and ancestor::dmodule[descendant::referencedApplicGroupRef]]]]</objectPath>\n\t\t\t\t\t\t<objectUse>The element referencedApplicGroupRef must not be used in the applicability Repository (Chap 3.9.5.3, Para 2.1.3).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00134": {
+   "source_identifier": "BREX-S1-00134",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00134\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//expression[ancestor::dmodule[descendant::commonRepository and descendant::identAndStatusSection[child::dmAddress[child::dmIdent[child::dmCode[attribute::infoCode=\"0A2\"]]]]] and not(ancestor::referencedApplicGroup)]</objectPath>\n\t\t\t\t\t\t<objectUse reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">In an applicability repository, the element expression (child of element applic) is used only in the referencedApplicGroup element (Chap 3.9.5.3, Para 2.4)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00144": {
+   "source_identifier": "BREX-S1-00265",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2009-133IGBRTT\" changeType=\"add\" changeMark=\"1\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00265\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">/dmodule[content/brDoc]/identAndStatusSection/dmAddress/dmIdent/dmCode[@infoCode!=\"024\" or @itemLocationCode!=\"D\"]</objectPath>\n\t\t\t\t\t\t<objectUse>The information code for a business rules document data module is 024, and the item location code is set to D. (Chap 4.10.1, Para 3).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00151": {
+   "source_identifier": "BREX-S1-00144",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00144\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">/dmodule[content/brex]/identAndStatusSection/dmAddress/dmIdent/dmCode[@modelIdentCode!=\"S1000D\" and @assyCode!=\"00\" and @assyCode!=\"0000\"]</objectPath>\n\t\t\t\t\t\t<objectUse>SNS must not be applied below sub-subsystem level. Unit/Assembly of the BREX DM must be 00 or 0000. (Chap 4.10.2.4, Para 2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00152": {
+   "source_identifier": "BREX-S1-00268",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"EPWG81.04\" changeType=\"add\" changeMark=\"1\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00268\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">/dmodule[content/brex]/identAndStatusSection/dmAddress/dmIdent/dmCode[@infoCode!=\"022\" or @itemLocationCode!=\"D\"]</objectPath>\n\t\t\t\t\t\t<objectUse>The information code for a BREX data module is 022, and the item location code is set to D. (Chap 4.10.2.4, Para 2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00200": {
+   "source_identifier": "BREX-S1-00193",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00193\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//@crewStepCondition</objectPath>\n\t\t\t\t\t\t<objectUse>Attribute crewStepCondition - Crew step condition (Chap 3.9.6.1, Table 18)</objectUse>\n\t\t\t\t\t\t<!-- \"csc01\" - Equipment is installed or available -->\n\t\t\t\t\t\t<!-- \"csc02\" - A detailed procedure for the step is located in the performance section of the condensed checklist -->\n\t\t\t\t\t\t<!-- \"csc03\" - Performance of the step is mandatory for all through-flights used for combat/tactical operations -->\n\t\t\t\t\t\t<!-- \"csc04\" - A step that is mandatory for night flights -->\n\t\t\t\t\t\t<!-- \"csc05\" - A task or step required by the operator manual -->\n\t\t\t\t\t\t<!-- Values within range csc51~csc99 can be allocated and defined by projects or organizations -->\n\t\t\t\t\t\t<objectValue valueForm=\"pattern\" valueAllowed=\"((csc0[1-5])|(csc5[1-9])|(csc[6-9][0-9]))((\\ )+((csc0[1-5])|(csc5[1-9])|(csc[6-9][0-9])))*\"/>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00260": {
+   "source_identifier": "BREX-S1-00244",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00244\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//@quantityUnitOfMeasure</objectPath>\n\t\t\t\t\t\t<objectUse>Attribute quantityUnitOfMeasure - Quantity data unit of measure. Apart from the pre-defined fixed values, values within range um51~um99 can be allocated and defined by projects or organizations (Chap 3.9.6.2, Table 2)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00261": {
+   "source_identifier": null,
+   "rule_xml": "<nonContextRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00245\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t<simplePara>Deletion of data modules is treated as a special case of update. The data module itself is not physically deleted from the CSDB but [only] marked as deleted. (Chap 3.9.5.1, Para 2.2)</simplePara>\n\t\t\t\t</nonContextRule>",
+   "proposal": ""
+  }
+ }
+}

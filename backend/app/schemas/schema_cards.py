@@ -1,0 +1,224 @@
+from typing import Any
+
+from pydantic import BaseModel, model_serializer
+
+
+class SchemaCardAttributeOut(BaseModel):
+    name: str
+    required: bool
+    enum: list[str] | None = None
+    # Truncation is a compact-output concern (docs request point 2): the
+    # generator itself always keeps the full enum; the endpoint decides
+    # what "a lot" means and says so explicitly whenever it cuts something,
+    # never in silence.
+    enum_truncated: bool = False
+    enum_omitted: int = 0
+
+
+class SchemaCardVariantOut(BaseModel):
+    schemas: list[str]
+    attributes: list[SchemaCardAttributeOut]
+    attributes_truncated: bool = False
+    attributes_omitted: int = 0
+    children: list[str]
+    children_truncated: bool = False
+    children_omitted: int = 0
+    resolved: bool
+
+
+class SchemaCardParentsGroupOut(BaseModel):
+    schemas: list[str]
+    parents: list[str]
+    parents_truncated: bool = False
+    parents_omitted: int = 0
+
+
+class SchemaCardEntryOut(BaseModel):
+    variants: list[SchemaCardVariantOut]
+    # The reverse index (docs request point 1: "Padres: índice inverso de
+    # los hijos") -- which elements allow THIS name as a child, across
+    # every schema variant combined (the generator's own `parents` index is
+    # a single flat list per name).
+    parents: list[str]
+    parents_truncated: bool = False
+    parents_omitted: int = 0
+    # Test de reglas, Part 5: the same parents per schema, grouped by
+    # identical lists (services/schema_cards.py _parents_by_schema).
+    parents_by_schema: list[SchemaCardParentsGroupOut] = []
+
+
+class SchemaCardsOut(BaseModel):
+    standard: str
+    # False means this standard has no generated schema cards at all
+    # (S1000D 5.0/6.0 -- no schema in this repo) -- distinct from a
+    # requested name simply not being a real element (that lands in
+    # `unknown` with `available=True`).
+    available: bool
+    cards: dict[str, SchemaCardEntryOut]
+    unknown: list[str]
+    # Suggest Rule part 2: every document-type schema of the standard (the
+    # variants a rule can be limited to), so the client can tell whether an
+    # element exists in ALL of them. [] when not available.
+    document_schemas: list[str] = []
+    # DITA (T4): for each requested name, the topic types whose graph has it
+    # (the card variants of the merged DITA schema cannot say). {} otherwise.
+    element_schemas: dict[str, list[str]] = {}
+
+
+class SchemaAttributeOwnerOut(BaseModel):
+    element: str
+    schemas: list[str]
+    required: bool
+    enum: list[str] | None = None
+
+
+class SchemaAttributeOut(BaseModel):
+    """C1: the elements that declare one attribute, with its values
+    (Ask's deterministic "which values does @x take" answer)."""
+
+    standard: str
+    name: str
+    available: bool
+    owners: list[SchemaAttributeOwnerOut] = []
+
+
+class SchemaStructureElementOut(BaseModel):
+    children: list[str]
+    attributes: list[str]
+
+
+class ContentModelOut(BaseModel):
+    """One element's content model for the rule test's placement."""
+
+    order: list[str] = []
+    # A name, or several when a required choice leaves the pick open.
+    required: list[str | list[str]] = []
+    text: bool = False
+    # [[name, value or None], ...] -- its required attributes.
+    attributes: list[list[str | None]] = []
+    # Mejoras G, Part 1.1: {child: most occurrences} -- a child left out is
+    # unbounded.
+    max: dict[str, int] = {}
+    # Valores de lista cerrada: {attribute: index into
+    # SchemaStructureOut.enum_lists} for its attributes with a closed list of
+    # values (enumeration) in this schema.
+    enums: dict[str, int] = {}
+    # Formato del texto, Part 1: the facets of its text when it is of simple
+    # content and its type has some -- "patterns" (all must match),
+    # "length", "minLength", "maxLength", "enumeration". Left out otherwise.
+    textFacets: dict[str, Any] | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_absent_facets(self, handler):
+        # Only a few elements have facets: no "textFacets": null on the rest.
+        data = handler(self)
+        if data.get("textFacets") is None:
+            data.pop("textFacets", None)
+        return data
+
+
+class MetadataNodeOut(BaseModel):
+    """One element of the minimal identification and status section."""
+
+    name: str
+    # [[name, value], ...] -- the element's required attributes.
+    attributes: list[list[str]] = []
+    text: str | None = None
+    children: list["MetadataNodeOut"] = []
+
+
+class MetadataSkeletonOut(BaseModel):
+    """Rule test on DM metadata: the minimal identification and status
+    section every assembled data module carries (rule_test_skeletons.py)."""
+
+    element: str
+    tree: MetadataNodeOut
+
+
+class RuleTestSkeletonOut(BaseModel):
+    root: str
+    # Element names from the root down to the insertion point, inclusive.
+    path: list[str]
+    insertion: str
+    # "para" (a chain down to <para>), "step" (DITA task) or the fallback
+    # used when the schema has none: "body", "content" or "root" (see
+    # rule_test_skeletons.py).
+    derivation: str
+    # T4b: elements of the path the application gives their required
+    # <title> as first child (DITA topics; [] for S1000D and maps).
+    titled: list[str] = []
+    # The data module's identification and status section (None for DITA and
+    # for documents that are not data modules).
+    metadata: MetadataSkeletonOut | None = None
+
+
+class SchemaStructureOut(BaseModel):
+    """Test rule (T2b): one schema's derived skeleton and its complete
+    element graph (children and attribute names, no truncation)."""
+
+    standard: str
+    schema_name: str
+    available: bool
+    skeleton: RuleTestSkeletonOut | None = None
+    elements: dict[str, SchemaStructureElementOut] = {}
+    # Each element's content model (order, required children, text, required
+    # attributes) -- see rule_test_skeletons.schema_content_models.
+    models: dict[str, ContentModelOut] = {}
+    # The closed lists of values the models' `enums` point to, each once
+    # (frontMatterType's fm01…fm99 is shared by every element that has it).
+    enum_lists: list[list[str]] = []
+    # DITA only: the topic types each topic element nests, and its body
+    # (rule_test_skeletons.dita_nesting) -- {} for S1000D and the map.
+    nesting: dict[str, "DitaNestingOut"] = {}
+
+
+class DitaNestingOut(BaseModel):
+    nested: list[str] = []
+    body: str | None = None
+
+
+SchemaStructureOut.model_rebuild()
+
+
+class SchemaRelationSchemaOut(BaseModel):
+    schema_name: str
+    direct: bool
+    # parent … child, the shortest chain when not direct (None if none).
+    path: list[str] | None = None
+
+
+class SchemaRelationOut(BaseModel):
+    """C2: can <parent> contain <child> directly, schema by schema (Ask's
+    deterministic yes/no answer)."""
+
+    standard: str
+    parent: str
+    child: str
+    available: bool
+    parent_exists: bool
+    child_exists: bool
+    schemas: list[SchemaRelationSchemaOut] = []
+
+
+class SchemaGraphOut(BaseModel):
+    """Mejoras C, Part 1: the whole standard's element graph, compact --
+    rule_test_skeletons.get_standard_graph."""
+
+    standard: str
+    available: bool
+    schemas: list[str] = []
+    roots: dict[str, list[str]] = {}
+    # {name: [[schemas], [children], [attribute names]], ...}
+    elements: dict[str, list[list[list[str]]]] = {}
+    # Child names whose pairs are never judged (DITA: the topic and map
+    # types -- which one nests in which is set per shell).
+    unchecked_children: list[str] = []
+    # Mejoras F, Part 2.1: {name: [[schemas], [required children], [required
+    # attribute names]]} -- only where something is required.
+    required: dict[str, list[list[list[str]]]] = {}
+    # Mejoras G, Part 1.1: {name: [[schemas], {child: most occurrences}]} --
+    # only finite maxima; a child left out is unbounded.
+    maxima: dict[str, list[list[Any]]] = {}
+    # Mejoras F, Part 1.1: {schema: {path, titled, metadata}} -- the document
+    # the application builds for each schema with nothing written.
+    skeletons: dict[str, dict] = {}

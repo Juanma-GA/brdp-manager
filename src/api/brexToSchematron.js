@@ -8,10 +8,53 @@
 function _quote(value) {
   return "'" + String(value == null ? '' : value).replace(/'/g, "''") + "'";
 }
-function _normSpace(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+// Confirmed real bug (SOPTE, 2828-rule project, comparing against the
+// customer's reference .SCH): the old regex-based `replace(/\s+/g, ' ')`
+// collapsed whitespace INSIDE quoted string literals too -- a rule
+// comparing against a two-space literal (' ', forbidding double space in
+// text) lost one of its two spaces in the generated Schematron. Structural
+// XPath whitespace (indentation/newlines between tokens) does need
+// collapsing to a single space; whitespace inside a quoted literal is
+// significant DATA, not formatting, and must survive untouched. Same
+// "scan char-by-char, track whether inside a quoted string" approach
+// _isSafePattern/_splitTopLevel already use below, reused here rather than
+// inventing a second way to do it.
+export function _normSpace(s) {
+  const str = String(s == null ? '' : s);
+  let out = '';
+  let inStr = false;
+  let q = '';
+  let pendingSpace = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inStr) {
+      out += ch;
+      if (ch === q) inStr = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      if (pendingSpace) { out += ' '; pendingSpace = false; }
+      inStr = true;
+      q = ch;
+      out += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace) { out += ' '; pendingSpace = false; }
+    out += ch;
+  }
+  return out.trim();
+}
+// A location path: starts at the root ("/", "//") or with a parenthesised
+// union of such paths ("(/a | /b)/c", real rule BRDP-S1-00019 of the 3.0.1
+// template). Before T2 a leading "(" made the rule a silent no-op here while
+// the rule test (ruleTestEngine.js) judged it.
 function _isPathExpression(path) {
   const t = _normSpace(path);
-  return t.startsWith('/') || t.startsWith('//');
+  return t.startsWith('/') || t.startsWith('(');
 }
 function _parentPath(path) {
   const t = _normSpace(path);
@@ -23,6 +66,14 @@ function _lastStep(path) {
   const t = _normSpace(path);
   return t.includes('/') ? t.replace(/^.*\//, '') : t;
 }
+// A context the xslt2 Schematron can use as sch:rule/@context: a safe
+// pattern that does not start with "(" (XSLT 2.0 patterns have no
+// parenthesised steps; XSLT 3.0 does, which is why _isSafePattern itself,
+// shared with the DITA xslt3 check, allows it). Shared with the rule test.
+export function _isContextPattern(ctx) {
+  return _isSafePattern(ctx) && !/^\s*\(/.test(ctx);
+}
+
 export function _isSafePattern(ctx) {
   if (!ctx || !ctx.trim()) return false;
   let p = 0, b = 0, inStr = false, q = '';
@@ -49,7 +100,7 @@ export function _isSafePattern(ctx) {
   return true;
 }
 
-function _splitTopLevel(path) {
+export function _splitTopLevel(path) {
   const t = _normSpace(path);
   let depth = 0, inStr = false, q = '', lastSep = -1;
   for (let i = 0; i < t.length; i++) { const ch = t[i];
@@ -92,32 +143,69 @@ function _attr(el, name) {
 function _escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function _escText(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
-function _buildValuePredicate(ruleEl, isNamespaceDeclRule, namespacePrefix) {
+// XPath numeric literal as number() reads it (xs:double lexical form, no
+// "0x…"/"Infinity"): the only bounds a range compares as numbers.
+const _NUMERIC_RE = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
+
+// The XPath check for ONE objval/objectValue, on the node as context item.
+// Shared with src/utils/ruleTestEngine.js, so the rule test and the
+// Schematron that Generate produces judge a value the same way:
+// - single: string(.) equals the value, exactly.
+// - range: "from~to" (4.x valueAllowed) or val1..val2 (3.0.1). Both bounds
+//   numbers → number(.) between them (a non-numeric value is outside: NaN
+//   compares false); both text → string comparison; a number and a text →
+//   still a string comparison, but with a `warning` the caller writes into the
+//   Schematron as a comment (HR7: never a silent guess).
+// - pattern: anchored like an XSD pattern facet, '^(…)$'. A capturing group,
+//   not '(?:…)': the Schematron is queryBinding="xslt2" and XPath 2.0 regexes
+//   have no non-capturing groups; for matches() both mean the same.
+// Returns { expr, form, from, to, pattern, warning, mixedRange }.
+export function _valueCheckXPath(v) {
+  const valtype = _attr(v, 'valtype');
+  const valueFormAttr = _attr(v, 'valueForm');
+  const form = valtype !== '' ? valtype : (valueFormAttr !== '' ? valueFormAttr : 'single');
+  const val1 = _attr(v, 'val1');
+  const valueAllowedAttr = _attr(v, 'valueAllowed');
+  if (form === 'range') {
+    const rangeParts = valueAllowedAttr.split('~');
+    const from = val1 !== '' ? val1 : (rangeParts[0] || '');
+    const to = _attr(v, 'val2') !== '' ? _attr(v, 'val2') : (rangeParts[rangeParts.length - 1] || '');
+    const fromNum = _NUMERIC_RE.test(from);
+    const toNum = _NUMERIC_RE.test(to);
+    if (fromNum && toNum) {
+      return { form, from, to, expr: 'number(.) ge number(' + _quote(from) + ') and number(.) le number(' + _quote(to) + ')', warning: null, mixedRange: false };
+    }
+    const mixedRange = fromNum !== toNum;
+    return {
+      form, from, to, mixedRange,
+      expr: 'string(.) ge ' + _quote(from) + ' and string(.) le ' + _quote(to),
+      warning: mixedRange ? "range '" + from + '~' + to + "' mixes a number and text; it is compared as text" : null,
+    };
+  }
+  if (form === 'pattern') {
+    const pattern = valueAllowedAttr !== '' ? valueAllowedAttr : val1;
+    return { form, pattern, expr: 'matches(string(.), ' + _quote('^(' + pattern + ')$') + ')', warning: null, mixedRange: false };
+  }
+  const valueAllowed = val1 !== '' ? val1 : valueAllowedAttr;
+  return { form, expr: 'string(.) = ' + _quote(valueAllowed), warning: null, mixedRange: false };
+}
+
+function _buildValuePredicate(ruleEl, isNamespaceDeclRule, namespacePrefix, warnings) {
   const vals = _getChildren(ruleEl, ['objval', 'objectValue']);
   const parts = [];
   for (const v of vals) {
-    const valtype = _attr(v, 'valtype');
-    const valueFormAttr = _attr(v, 'valueForm');
-    const valueForm = valtype !== '' ? valtype : (valueFormAttr !== '' ? valueFormAttr : 'single');
+    const check = _valueCheckXPath(v);
     const val1 = _attr(v, 'val1');
-    const valueAllowedAttr = _attr(v, 'valueAllowed');
-    const valueAllowed = val1 !== '' ? val1 : valueAllowedAttr;
+    const valueAllowed = val1 !== '' ? val1 : _attr(v, 'valueAllowed');
     const conditionalPath = _normSpace(_attr(v, 'val2')).replace(/"/g, "'");
-    const fromValue = val1 !== '' ? val1 : (valueAllowedAttr.split('~')[0] || '');
-    const rangeParts = valueAllowedAttr.split('~');
-    const toValue = _attr(v, 'val2') !== '' ? _attr(v, 'val2') : (rangeParts[rangeParts.length - 1] || '');
     let p = '(';
     if (isNamespaceDeclRule) {
       p += 'namespace-uri-for-prefix(' + _quote(namespacePrefix) + ', /dmodule) = ' + _quote(valueAllowed);
-    } else if (valueForm === 'range') {
-      p += 'string(.) ge ' + _quote(fromValue) + ' and string(.) le ' + _quote(toValue);
-    } else if (valueForm === 'pattern') {
-      const pat = valueAllowedAttr !== '' ? valueAllowedAttr : val1;
-      p += 'matches(string(.), ' + _quote(pat) + ')';
     } else {
-      p += 'string(.) = ' + _quote(valueAllowed);
+      p += check.expr;
+      if (check.warning) warnings.push(check.warning);
     }
-    if (!isNamespaceDeclRule && valueForm !== 'range' && conditionalPath.length > 0) {
+    if (!isNamespaceDeclRule && check.form !== 'range' && conditionalPath.length > 0) {
       p += ' and exists(' + conditionalPath + ')';
     }
     p += ')';
@@ -150,7 +238,8 @@ function _convertRule(ruleEl, ruleNumber) {
   const pPath = _parentPath(objectPath);
   const targetStep = _lastStep(objectPath);
   const isNoOpRule = !isPath || ((objAppl !== '0') && (objAppl !== '1') && !hasValueRules);
-  const valuePredicate = hasValueRules ? _buildValuePredicate(ruleEl, isNamespaceDeclRule, namespacePrefix) : '';
+  const warnings = [];
+  const valuePredicate = hasValueRules ? _buildValuePredicate(ruleEl, isNamespaceDeclRule, namespacePrefix, warnings) : '';
 
   let ruleContext;
   if (isNamespaceDeclRule) ruleContext = '/dmodule';
@@ -187,7 +276,7 @@ function _convertRule(ruleEl, ruleNumber) {
   // objAppl=1: split consciente de corchetes (evita romper rutas con '/' dentro de predicados)
   if (isPath && !isNamespaceDeclRule && objAppl === '1') {
     const sp = _splitTopLevel(objectPath);
-    if (sp && _isSafePattern(sp.parent)) {
+    if (sp && _isContextPattern(sp.parent)) {
       ruleContext = sp.parent;
       coreTest = hasValueRules ? 'exists(' + sp.step + '[' + valuePredicate + '])' : 'exists(' + sp.step + ')';
     } else {
@@ -197,7 +286,7 @@ function _convertRule(ruleEl, ruleNumber) {
   }
 
   // Robustez general: si el context no es un patrón XSLT válido, mover la ruta al test
-  if (isPath && !_isSafePattern(ruleContext)) {
+  if (isPath && !_isContextPattern(ruleContext)) {
     ruleContext = '/dmodule';
     if (objAppl === '0') {
       coreTest = hasValueRules ? 'not(exists(' + objectPath + '[' + valuePredicate + ']))' : 'not(exists(' + objectPath + '))';
@@ -217,7 +306,7 @@ function _convertRule(ruleEl, ruleNumber) {
     finalTest = coreTest;
   }
   const role = (objAppl === '0' || objAppl === '1') ? 'error' : (isNoOpRule ? 'warning' : 'error');
-  return { ruleNumber, seqAssertId: 'BREX-R-' + String(ruleNumber).padStart(4, '0'), seqPatternId: 'brex-r-' + String(ruleNumber).padStart(4, '0'), context: _normSpace(ruleContext), test: _normSpace(finalTest), role, message: ruleMessage };
+  return { ruleNumber, seqAssertId: 'BREX-R-' + String(ruleNumber).padStart(4, '0'), seqPatternId: 'brex-r-' + String(ruleNumber).padStart(4, '0'), context: _normSpace(ruleContext), test: _normSpace(finalTest), role, message: ruleMessage, warnings };
 }
 
 function _collectRules(doc) {
@@ -280,9 +369,12 @@ export function brexToSchematron(brexXml, options = {}) {
     const srcId = ruleEl.getAttribute && ruleEl.getAttribute('id');
     const assertId = (preserveBrdpId && srcId) ? srcId : r.seqAssertId;
     const patternId = (preserveBrdpId && srcId) ? srcId.toLowerCase() : r.seqPatternId;
+    const warningComments = r.warnings
+      .map((w) => `      <!-- ${`${assertId}: ${w}`.replace(/--+/g, '-')} -->\n`)
+      .join('');
     body +=
 `   <sch:pattern id="${_escAttr(patternId)}">
-      <sch:rule context="${_escAttr(r.context)}">
+${warningComments}      <sch:rule context="${_escAttr(r.context)}">
          <sch:assert id="${_escAttr(assertId)}" role="${r.role}" test="${_escAttr(r.test)}">${_escText(r.message)}</sch:assert>
       </sch:rule>
    </sch:pattern>

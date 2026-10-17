@@ -1,0 +1,33 @@
+{
+  "_comment": "Case types for the 'before' fixture, which (like runs made before C2b) has no `type` in responses.json.",
+  "cases": [
+    {
+      "id": "ask-a",
+      "type": "ask"
+    },
+    {
+      "id": "ask-det",
+      "type": "ask"
+    },
+    {
+      "id": "sp-b",
+      "type": "suggest-proposal"
+    },
+    {
+      "id": "rt-titled",
+      "type": "rule-test"
+    },
+    {
+      "id": "rule-err",
+      "type": "suggest-rule"
+    },
+    {
+      "id": "sr-names",
+      "type": "suggest-rule"
+    },
+    {
+      "id": "gone",
+      "type": "ask"
+    }
+  ]
+}
