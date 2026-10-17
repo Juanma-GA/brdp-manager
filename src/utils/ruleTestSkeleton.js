@@ -1110,10 +1110,26 @@ function reachableAvoiding(elements, starts, blocked) {
 
 // Which of the two examples a schema allows for a relation: { inside: the
 // checked element with the other one above it (parent: directly above),
-// outside: without it }. From the document's root, over the whole graph.
+// outside: without it }. From the document's root, over the graph without
+// the skeleton's identification and status section (skeleton.metadata):
+// the examples' content never goes there, so a case only that section
+// allows (S1000D 3.0.1 descript: a <seqlist> outside <descript> only at
+// idstatus/…/copyright/para) does not count -- it is listed in
+// `metadataOnly` ('inside' / 'outside'), and the key is there only then.
 export function relationCases(structure, relation) {
   const elements = structure.elements;
   const root = structure.skeleton.path[0];
+  const section = structure.skeleton.metadata?.element || null;
+  const whole = relationCasesIn(elements, root, relation);
+  if (!section || section === root || !elements[section]) return whole;
+  const content = { ...elements };
+  delete content[section];
+  const cases = relationCasesIn(content, root, relation);
+  const metadataOnly = ['inside', 'outside'].filter((side) => whole[side] && !cases[side]);
+  return metadataOnly.length ? { ...cases, metadataOnly } : cases;
+}
+
+function relationCasesIn(elements, root, relation) {
   const { element, ancestor, axis } = relation;
   const all = reachableSet(elements, [root]);
   if (!all.has(element)) return { inside: false, outside: false };
@@ -1767,12 +1783,19 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // could not be written. An ancestor this schema does not have
   // (<preliminaryRqmts> in descript) asks for nothing; a schema that allows
   // only one of the cases is Mejoras A's (splitByRelation, `relation`).
+  // A case only the identification and status section allows (relationCases'
+  // metadataOnly, when no other schema allows it in the content) still makes
+  // the relation active, as before (EXT-00134 in comrep: <expression>
+  // outside <referencedApplicGroup> only in the section, so the insertion
+  // point is the root); the prompt gives that case's way too.
   const activeRelations = relation
     ? []
-    : (targets?.relations || []).filter((r) => {
-        if (!contentChecked.includes(r.element) || !elements[r.ancestor] || r.ancestor === r.element) return false;
+    : (targets?.relations || []).flatMap((r) => {
+        if (!contentChecked.includes(r.element) || !elements[r.ancestor] || r.ancestor === r.element) return [];
         const cases = relationCases(structure, r);
-        return cases.inside && cases.outside;
+        const section = cases.metadataOnly || [];
+        if (!(cases.inside || section.includes('inside')) || !(cases.outside || section.includes('outside'))) return [];
+        return [section.length ? { ...r, section } : r];
       });
   const relationsOk = (i) =>
     activeRelations.every(
@@ -1916,13 +1939,30 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // Colocación, Part 1: the way to write the checked element inside each
   // ancestor, from the insertion point (the prompt and the correction
   // round give it, like Mejoras D's writePaths).
+  // "Dentro/fuera de X": the way outside too, never "by any other valid
+  // way"; a case only the identification and status section allows gets
+  // its way from the document's root, through the section (`section`).
+  const rootName = structure.skeleton.path[0];
+  const caseWay = (r, inside) =>
+    relationWay(elements, placed.path, placed.insertion, r, inside)
+    || (r.section?.includes(inside ? 'inside' : 'outside') ? relationWay(elements, [], rootName, r, inside) : null);
   const relationWays = activeRelations
-    .map((r) => ({ element: r.element, ancestor: r.ancestor, axis: r.axis, way: relationWay(elements, placed.path, placed.insertion, r, true) }))
+    .map((r) => ({
+      element: r.element,
+      ancestor: r.ancestor,
+      axis: r.axis,
+      way: caseWay(r, true),
+      outside: caseWay(r, false),
+      ...(r.section ? { section: r.section } : {}),
+    }))
     .filter((r) => r.way);
   if (relationWays.length) placed.relationWays = relationWays;
   if (relation) {
     const way = relationWay(elements, placed.path, placed.insertion, relation, relation.inside);
-    placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : null };
+    // Mejoras A's fallback: no schema allows this case in its content, only
+    // through the identification and status section -- its way from the root.
+    const sectionWay = way ? null : relationWay(elements, [], rootName, relation, relation.inside);
+    placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : sectionWay };
   }
   // Part 2.3: a name with its own inner way gets no shortest-way route.
   const innerNames = new Set((placed.innerWays || []).flatMap((x) => x.names));

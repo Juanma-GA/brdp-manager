@@ -1006,6 +1006,8 @@ const resources = {
             schemaLimit: 'The schema prevents writing the example that breaks the decision (<{{parent}}> allows at most {{max}} <{{element}}>); the schema may already enforce it.',
             skeletonPlacement: 'Inconclusive: the rule rejects an example meant to be accepted only because the application builds it inside <{{inside}}>; written directly in <{{at}}>, the rule accepts it. This test says nothing about the rule.',
             missingFile: 'Inconclusive: the example meant to be rejected points to {{paths}}, which is not in the dossier.',
+            // "Dentro/fuera de X", Part 3.
+            relationSide: 'Inconclusive: a fix moved the example with <{{element}}> {{side}} to the other side, and no other valid example tests that case.',
             notApplicable_all: 'Inconclusive: the rule applies to none of the examples (its context asks the root for {{predicate}}).',
             notApplicable_reject: 'Inconclusive: the rule applies to none of the examples meant to be rejected (its context asks the root for {{predicate}}).',
             notApplicable_accept: 'Inconclusive: the rule applies to none of the examples meant to be accepted (its context asks the root for {{predicate}}).',
@@ -1082,6 +1084,14 @@ const resources = {
           skeletonPlacementExample: 'The application builds this example inside <{{inside}}> (dimmed part), and the rule rejects it for that. Written directly in <{{at}}>, the rule accepts it.',
           labelRemoved: 'corrected: {{names}} removed',
           labelMoved: 'corrected: {{names}} moved',
+          // "Dentro/fuera de X", Part 3: an example a fix moved to the other side.
+          sideChanged: 'The fix left <{{element}}> {{now}}: this example no longer tests the case {{side}}, so it does not count for the result.',
+          relationSides: {
+            inside: 'inside <{{ancestor}}>',
+            outside: 'outside <{{ancestor}}>',
+            parentInside: 'directly inside <{{ancestor}}>',
+            parentOutside: 'not directly inside <{{ancestor}}>',
+          },
           // Mejoras E, Part 2.3: an engine error on an example.
           engineError: {
             severalItems: '{{fn}}() received several {{names}} and only accepts one.',
@@ -1470,6 +1480,7 @@ const resources = {
             test_missing_expectation: 'an example meant to be accepted and one meant to be rejected could not both be run',
             test_skeleton_placement: 'the application builds the examples inside <{{inside}}>, and the rule rejects them for that (written directly in <{{at}}>, it accepts them)',
             test_missing_file: 'the example meant to be rejected points to {{paths}}, which is not in the dossier',
+            test_relation_side: 'a fix moved the example with <{{element}}> {{side}} to the other side, and no other valid example tests that case',
             test_not_applicable: 'the rule applies to none of the examples{{which}} (its context asks the root for {{predicate}})',
             notApplicableWhich_reject: ' meant to be rejected',
             notApplicableWhich_accept: ' meant to be accepted',
@@ -3056,6 +3067,7 @@ const resources = {
             schemaLimit: 'El esquema impide escribir el ejemplo que incumple la decisión (<{{parent}}> admite como mucho {{max}} <{{element}}>); puede que el esquema ya lo imponga.',
             skeletonPlacement: 'No concluyente: la regla rechaza un ejemplo que debía aceptar solo porque la aplicación lo monta dentro de <{{inside}}>; escrito directamente en <{{at}}>, la regla lo acepta. Esta prueba no dice nada de la regla.',
             missingFile: 'No concluyente: el ejemplo a rechazar apunta a {{paths}}, que no está en el dosier.',
+            relationSide: 'No concluyente: una corrección cambió de lado el ejemplo con <{{element}}> {{side}} y no queda otro ejemplo válido de ese caso.',
             notApplicable_all: 'No concluyente: la regla no se aplica a ningún ejemplo (su contexto pide {{predicate}} en la raíz).',
             notApplicable_reject: 'No concluyente: la regla no se aplica a ningún ejemplo que debía rechazar (su contexto pide {{predicate}} en la raíz).',
             notApplicable_accept: 'No concluyente: la regla no se aplica a ningún ejemplo que debía aceptar (su contexto pide {{predicate}} en la raíz).',
@@ -3127,6 +3139,13 @@ const resources = {
           skeletonPlacementExample: 'La app monta este ejemplo dentro de <{{inside}}> (parte atenuada), y la regla lo rechaza por eso. Escrito directamente en <{{at}}>, la regla lo acepta.',
           labelRemoved: 'corregido: se quitó {{names}}',
           labelMoved: 'corregido: se movió {{names}}',
+          sideChanged: 'La corrección dejó <{{element}}> {{now}}: este ejemplo ya no prueba el caso {{side}}, así que no cuenta para el resultado.',
+          relationSides: {
+            inside: 'dentro de <{{ancestor}}>',
+            outside: 'fuera de <{{ancestor}}>',
+            parentInside: 'directamente dentro de <{{ancestor}}>',
+            parentOutside: 'no directamente dentro de <{{ancestor}}>',
+          },
           engineError: {
             severalItems: '{{fn}}() ha recibido varios {{names}} y solo admite uno.',
             severalNodes: '{{fn}}() ha recibido varios nodos y solo admite uno.',
@@ -3509,6 +3528,7 @@ const resources = {
             test_missing_expectation: 'no se pudieron ejecutar a la vez un ejemplo que se acepta y otro que se rechaza',
             test_skeleton_placement: 'la aplicación monta los ejemplos dentro de <{{inside}}>, y la regla los rechaza por eso (escritos directamente en <{{at}}>, los acepta)',
             test_missing_file: 'el ejemplo a rechazar apunta a {{paths}}, que no está en el dosier',
+            test_relation_side: 'una corrección cambió de lado el ejemplo con <{{element}}> {{side}} y no queda otro ejemplo válido de ese caso',
             test_not_applicable: 'la regla no se aplica a ningún ejemplo{{which}} (su contexto pide {{predicate}} en la raíz)',
             notApplicableWhich_reject: ' que debía rechazar',
             notApplicableWhich_accept: ' que debía aceptar',

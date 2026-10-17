@@ -83,7 +83,7 @@ export const ENGINE_REASON_CODES = [
   'example_no_room', 'condition_no_schema', 'reference_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
   'section_value_unavailable', 'undeclared_known_prefix', 'undeclared_prefix',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement', 'test_not_applicable', 'test_missing_file'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement', 'test_not_applicable', 'test_missing_file', 'test_relation_side'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -107,6 +107,10 @@ export function formatRuleTestReason(reason, t) {
   // Un ejemplo de dosier al que le falta un fichero: the path(s).
   if (reason.code === 'test_missing_file') {
     return t('records.ruleTest.reasons.test_missing_file', { paths: (params.paths || []).join(', ') });
+  }
+  // "Dentro/fuera de X", Part 3: the case the moved example tested.
+  if (reason.code === 'test_relation_side') {
+    return t('records.ruleTest.reasons.test_relation_side', { element: params.element, side: relationSideText(params, params.side, t) });
   }
   if (reason.code === 'test_threshold_mismatch') {
     return t('records.ruleTest.reasons.test_threshold_mismatch', { detail: formatThresholdMismatch(params, t) || '' });
@@ -234,6 +238,9 @@ export function verdictToTestRecord(verdict) {
       if (verdict.why === 'missing_file') {
         return { result: 'inconclusive', reason: { code: 'test_missing_file', params: { paths: verdict.paths || [] } } };
       }
+      if (verdict.why === 'relation_side') {
+        return { result: 'inconclusive', reason: { code: 'test_relation_side', params: { element: verdict.element, ancestor: verdict.ancestor, axis: verdict.axis, side: verdict.side } } };
+      }
       if (verdict.why === 'not_applicable') {
         return { result: 'inconclusive', reason: { code: 'test_not_applicable', params: { which: verdict.which || 'all', conditions: verdict.conditions || [] } } };
       }
@@ -248,6 +255,14 @@ export function verdictToTestRecord(verdict) {
     default:
       return null;
   }
+}
+
+// "Dentro/fuera de X", Part 3: one side of a relation ({ ancestor, axis }),
+// in words: "outside <descript>", "directly inside <procedure>".
+export function relationSideText(relation, side, t) {
+  const parent = relation.axis === 'parent';
+  const key = side === 'inside' ? (parent ? 'parentInside' : 'inside') : parent ? 'parentOutside' : 'outside';
+  return t(`records.ruleTest.relationSides.${key}`, { ancestor: relation.ancestor });
 }
 
 // ─── The deterministic rule description (T3b, Part 1) ───────────────────────

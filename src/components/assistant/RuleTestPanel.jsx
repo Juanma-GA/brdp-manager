@@ -7,7 +7,7 @@ import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { dossierFileSelection } from '../../utils/ruleTestSchematron.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { ANCESTOR_LIST_SHOWN, acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleStatement, formatRuleTestReason, formatThresholdMismatch, presencePathText, rootPredicateText } from '../../utils/ruleTestReasons.js';
+import { ANCESTOR_LIST_SHOWN, acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleStatement, formatRuleTestReason, formatThresholdMismatch, presencePathText, relationSideText, rootPredicateText } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -76,6 +76,10 @@ export function verdictView(t, verdict, standard) {
       // Un ejemplo de dosier al que le falta un fichero.
       if (verdict.why === 'missing_file') {
         return { tone: 'warn', text: t('records.ruleTest.verdicts.missingFile', { paths: (verdict.paths || []).join(', ') }) };
+      }
+      // "Dentro/fuera de X", Part 3: a fix moved the only example of a case.
+      if (verdict.why === 'relation_side') {
+        return { tone: 'warn', text: t('records.ruleTest.verdicts.relationSide', { element: verdict.element, side: relationSideText(verdict, verdict.side, t) }) };
       }
       // El contexto en la raíz: the rule applies to no example.
       if (verdict.why === 'not_applicable') {
@@ -602,6 +606,16 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
         <p className={styles.ruleTestNote} data-testid="rule-test-relocated">
           {t('records.ruleTest.relocated', {
             moves: example.relocated.map((m) => `<${m.element}> → ${m.path.slice(0, -1).join('/')}`).join('; '),
+          })}
+        </p>
+      )}
+      {/* "Dentro/fuera de X", Part 3: moved to the other side, not counted. */}
+      {example.sideChanged && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-side-changed">
+          {t('records.ruleTest.sideChanged', {
+            element: example.sideChanged.element,
+            now: relationSideText(example.sideChanged, example.sideChanged.intended === 'inside' ? 'outside' : 'inside', t),
+            side: relationSideText(example.sideChanged, example.sideChanged.intended, t),
           })}
         </p>
       )}

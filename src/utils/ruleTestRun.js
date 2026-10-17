@@ -322,14 +322,22 @@ async function splitByRelation({ ruleXml, targets, cards, elementSchemas, testSc
   // The example the rule selects: outside for not(…), inside otherwise.
   const selectedInside = !relation.negated;
   const parts = [];
+  const order = [testSchema, ...(candidates || []).filter((s) => s !== testSchema)];
   for (const inside of [selectedInside, !selectedInside]) {
+    const side = inside ? 'inside' : 'outside';
+    // A case the content of a schema allows first; one only its
+    // identification and status section allows (relationCases'
+    // metadataOnly) only when no schema allows it in the content.
     let schema = null;
-    for (const candidate of [testSchema, ...(candidates || []).filter((s) => s !== testSchema)]) {
-      const cases = await casesIn(candidate);
-      if (cases && (inside ? cases.inside : cases.outside)) {
-        schema = candidate;
-        break;
+    for (const viaSection of [false, true]) {
+      for (const candidate of order) {
+        const cases = await casesIn(candidate);
+        if (cases && (cases[side] || (viaSection && (cases.metadataOnly || []).includes(side)))) {
+          schema = candidate;
+          break;
+        }
       }
+      if (schema) break;
     }
     if (!schema) {
       return {
@@ -341,6 +349,9 @@ async function splitByRelation({ ruleXml, targets, cards, elementSchemas, testSc
     }
     parts.push({ schema, relation: { element: relation.element, ancestor: relation.ancestor, axis: relation.axis, negated: relation.negated, inside, selected: inside === selectedInside } });
   }
+  // Both cases in the test schema, one of them only through its section
+  // (no schema allows it in the content): one schema, as before.
+  if (parts.every((part) => part.schema === testSchema)) return null;
   return { parts };
 }
 
@@ -1590,7 +1601,18 @@ export async function generateRuleTestExamples({
             examples,
             runs,
             failures,
-            aligned ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex)) : reparsed.examples,
+            // "Dentro/fuera de X", Part 3: a corrected example keeps the
+            // side the first one was written for (materializeExample says
+            // when the correction moved it to the other side).
+            aligned
+              ? examples.map((ex, i) =>
+                  failing.has(i)
+                    ? materialized[i]?.relationSides
+                      ? { ...reparsed.examples[i], relationIntended: materialized[i].relationSides }
+                      : reparsed.examples[i]
+                    : ex
+                )
+              : reparsed.examples,
             aligned
           );
           // The answer to the correction keeps only what this test asks for

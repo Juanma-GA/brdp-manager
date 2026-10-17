@@ -6017,6 +6017,61 @@
           "type": "rule_test_verdict_correct"
         }
       ]
+    },
+    {
+      "id": "rule-test-3-0-1-seqlist-outside-descript",
+      "description": "Dentro/fuera de X: general rule //seqlist[not(ancestor-or-self::descript)]. In descript a <seqlist> outside <descript> is only possible inside idstatus; the test used descript alone, the \"outside\" example went directly in <content> (invalid) and the correction moved it inside <descript>: \"failed\". Now the outside example goes in proced (the content allows it there) and the inside one in descript, each with its way.",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "rule": "<objrule>\n  <objpath objappl=\"0\">//descendant-or-self::seqlist[not(ancestor-or-self::descript)]</objpath>\n  <objuse>Sequential lists are only used in descriptive data modules.</objuse>\n</objrule>",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-SEQLIST",
+        "title": "Sequential lists",
+        "definition": "Decide where sequential lists are used.",
+        "proposal": "Sequential lists are only used in descriptive data modules.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-seqlist-side-swap",
+      "description": "Dentro/fuera de X, Part 3: the correction moves the \"outside\" example to the other side (written in descript, inside <descript>). It no longer tests its case: not counted, and with no other outside example the test is inconclusive, never \"failed\". SIDESWAP makes the simulator answer that way.",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "rule": "<objrule>\n  <objpath objappl=\"0\">//descendant-or-self::seqlist[not(ancestor-or-self::descript)]</objpath>\n  <objuse>Sequential lists are only used in descriptive data modules.</objuse>\n</objrule>",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-SEQSWAP",
+        "title": "Sequential lists",
+        "definition": "Decide where sequential lists are used.",
+        "proposal": "Sequential lists are only used in descriptive data modules. SIDESWAP",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_verdict_in",
+          "expect": [
+            "inconclusive"
+          ],
+          "why": "relation_side",
+          "note": "the moved example is not counted"
+        }
+      ]
     }
   ]
 }

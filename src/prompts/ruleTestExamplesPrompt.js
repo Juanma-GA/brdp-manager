@@ -227,16 +227,28 @@ function writePathLines(p) {
 // checked element both inside and outside that ancestor: the way to write
 // it inside each one. Neutral, like the relation split of Mejoras A:
 // which example follows the decision is up to the decision.
+// "Dentro/fuera de X": the way outside is given too (a way from the
+// document's root when only the identification and status section allows
+// that case -- `section`), never "by any other valid way".
+const sectionNote = (r, inside) =>
+  (r.section || []).includes(inside ? 'inside' : 'outside') ? ' (only in the identification and status section)' : '';
+
 function relationWayLines(p) {
   const ways = p.relationWays || [];
   if (ways.length === 0) return '';
   const element = ways[0].element;
   const names = ways.map((r) => relationPhrase(r, true)).join(', ');
   const lines = ways.map((r) => `
-    <${r.element}> ${relationPhrase(r, true)}: ${r.way.join('/')}`);
+    <${r.element}> ${relationPhrase(r, true)}${sectionNote(r, true)}: ${r.way.join('/')}`);
+  const outside = ways.filter((r) => r.outside);
+  const outsideLines = outside.map((r) => `
+    <${r.element}> ${relationPhrase(r, false)}${sectionNote(r, false)}: ${r.outside.join('/')}`);
+  const outsideText = outside.length
+    ? `
+  and <${element}> outside by exactly ${outside.length > 1 ? 'one of these ways' : 'this way'}, never moving it into that element:${outsideLines.join('')}`
+    : '';
   return `
-  The rule's path looks at whether <${element}> is ${names}. Write <${element}> inside by exactly one of these ways, never moving it out of that element:${lines.join('')}
-  and <${element}> outside ${ways.length > 1 ? 'them' : 'it'} by any other valid way.`;
+  The rule's path looks at whether <${element}> is ${names}. Write <${element}> inside by exactly one of these ways, never moving it out of that element:${lines.join('')}${outsideText}`;
 }
 
 // Test de reglas: referencias, antepasados…, Part 1.1: the checked node

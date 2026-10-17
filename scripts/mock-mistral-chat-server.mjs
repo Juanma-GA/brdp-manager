@@ -726,6 +726,33 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Step with emphasis", expected: "reject", schema: ruleSchema, content: pushed ? "Remove the <emphasis>four</emphasis> bolts.<randomList><listItem><para>Panel</para></listItem></randomList>" : "Remove the <emphasis>four</emphasis> bolts from the access panel." },
     ]);
   }
+  // "Dentro/fuera de X" (S1000D 3.0.1, general rule
+  // //descendant-or-self::seqlist[not(ancestor-or-self::descript)]), as
+  // Mistral answered. With one schema (descript, content at <dmodule>, the
+  // outside case only in idstatus) the "outside" example goes directly in
+  // <content> -- not valid -- and the correction puts it in
+  // <descript>/<para>, inside <descript>. Split by schema, the outside one
+  // goes in proced; SIDESWAP: first not valid, then the correction writes
+  // it in descript (the other side).
+  if (/seqlist\[not\(ancestor-or-self::descript\)\]/.test(rule)) {
+    const list = "<seqlist><item><para>Open the panel.</para></item><item><para>Remove the filter.</para></item></seqlist>";
+    const inDescript = `<content><descript><para0><title>Overview</title><para>${list}</para></para0></descript></content>`;
+    if (/examples where <seqlist> is NOT inside <descript>/.test(systemPrompt)) {
+      const outside = !/SIDESWAP/.test(proposal)
+        ? { schema: "proced", content: list }
+        : correcting
+          ? { schema: "descript", content: list }
+          : { schema: "proced", content: "<seqlist><para>Open the panel.</para></seqlist>" };
+      return answer([
+        { label: "Sequential list in a procedure", expected: "reject", ...outside },
+        { label: "Sequential list in a description", expected: "accept", schema: "descript", content: list },
+      ]);
+    }
+    return answer([
+      { label: "Sequential list outside the description", expected: "reject", schema: ruleSchema || "descript", content: correcting ? inDescript : `<content>${list}</content>` },
+      { label: "Sequential list in the description", expected: "accept", schema: ruleSchema || "descript", content: inDescript },
+    ]);
+  }
   if (/ALLINVALID/.test(proposal)) {
     const bad = "<sbSummary><levelledPara><para>Remove the panel.</para></levelledPara></sbSummary>";
     return answer([

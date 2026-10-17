@@ -220,6 +220,86 @@ export function ruleSelectionSignature(rule, xml, schema, { parseXml = parseXmlD
   return JSON.stringify([result.status, selected, messages, (result.conditions || []).map((c) => c.holds)]);
 }
 
+// "Dentro/fuera de X", Part 3: a rule that looks at whether its checked
+// element is inside another one (Mejoras A's split, `placement.relation`,
+// or both cases in one schema, `placement.relationWays`). Each example is
+// written for one side; a fix -- the application's (relocation, wrapping)
+// or the correction round's -- that moves it to the other side leaves an
+// example that no longer tests its case (S1000D 3.0.1, a <seqlist> written
+// directly in <content> and moved into <descript>/<para>): it is not
+// counted (ruleTestVerdict) and says why.
+const relationKey = (r) => `${r.element}|${r.axis}|${r.ancestor}`;
+
+function placementRelations(placement) {
+  if (placement?.relation) return [placement.relation];
+  return placement?.relationWays || [];
+}
+
+// The sides ('inside' / 'outside') the checked element of `relation` is on
+// in the document, the skeleton's own elements left out; null when the
+// document cannot be read.
+export function relationSidesOf(xml, relation, parseXml = parseXmlDocument, skeletonNodePaths = []) {
+  if (!xml) return null;
+  let doc;
+  try {
+    doc = parseXml(xml);
+  } catch {
+    return null;
+  }
+  const skip = new Set(skeletonNodePaths);
+  const sides = new Set();
+  const visit = (node) => {
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType !== 1) continue;
+      const name = child.localName || String(child.nodeName).replace(/^.*:/, '');
+      if (name === relation.element && !skip.has(nodePath(child))) {
+        let inside = false;
+        if (relation.axis === 'parent') {
+          const parent = child.parentNode;
+          inside = parent?.nodeType === 1 && (parent.localName || String(parent.nodeName).replace(/^.*:/, '')) === relation.ancestor;
+        } else {
+          for (let up = child.parentNode; up && up.nodeType === 1; up = up.parentNode) {
+            if ((up.localName || String(up.nodeName).replace(/^.*:/, '')) === relation.ancestor) {
+              inside = true;
+              break;
+            }
+          }
+        }
+        sides.add(inside ? 'inside' : 'outside');
+      }
+      visit(child);
+    }
+  };
+  visit(doc);
+  return [...sides];
+}
+
+// The side an example was written for: the only side its checked elements
+// are on, or null (none, both, unreadable).
+const singleSide = (sides) => (sides && sides.length === 1 ? sides[0] : null);
+
+// { relationSides: { key: intended side }, sideChanged } for a materialized
+// example. `intended` comes from the example before the correction round
+// (relationIntended, set by the caller) or, without it, from the example as
+// the LLM (or the person) wrote it, before the application's fixes.
+function relationSideCheck(example, placement, before, after, parseXml) {
+  const relations = placementRelations(placement);
+  if (relations.length === 0 || !after.xml) return null;
+  const intended = {};
+  let sideChanged = null;
+  for (const r of relations) {
+    const key = relationKey(r);
+    const fromCorrection = example.relationIntended?.[key] || null;
+    const side = fromCorrection || (before ? singleSide(relationSidesOf(before.xml, r, parseXml, before.skeletonNodePaths)) : null);
+    const now = relationSidesOf(after.xml, r, parseXml, after.skeletonNodePaths);
+    if (side) intended[key] = side;
+    if (!sideChanged && side && now && now.length > 0 && !now.includes(side)) {
+      sideChanged = { element: r.element, ancestor: r.ancestor, axis: r.axis, intended: side, by: fromCorrection ? 'correction' : 'application' };
+    }
+  }
+  return { relationSides: intended, sideChanged };
+}
+
 export function materializeExample(example, setup, parseXml = parseXmlDocument) {
   const offered = Object.keys(setup.placements || {});
   const schema = example.schema || (offered.length === 1 ? offered[0] : null);
@@ -458,8 +538,22 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     !dossier && entry.placement.contentInsertion !== false && entry.placement.rootOnly !== true
       ? skeletonLiftLevels(entry.placement, entry.structure, adjusted.content, parseXml)
       : null;
+  // "Dentro/fuera de X", Part 3: the example as written, before every fix
+  // of the application, only when a fix changed it.
+  const relationPlaced = placementRelations(entry.placement).length > 0;
+  const changedByFixes = relationPlaced && (String(adjusted.content ?? '') !== String(example.content ?? '') || String(metadata ?? '') !== String(example.metadata ?? ''));
+  const before = !relationPlaced
+    ? null
+    : changedByFixes
+      ? assembleExample({ standard: setup.standard, schema, schemaLocation: setup.schemaLocation, placement: entry.placement, content: example.content, metadata: example.metadata ?? null, rootAttributes: adjusted.rootAttributes || null })
+      : { xml, skeletonNodePaths };
+  const sideCheck = relationPlaced ? relationSideCheck(example, entry.placement, before, { xml, skeletonNodePaths }, parseXml) : null;
+  delete adjusted.relationSides;
+  delete adjusted.sideChanged;
   return {
     ...adjusted,
+    ...(sideCheck && Object.keys(sideCheck.relationSides).length ? { relationSides: sideCheck.relationSides } : {}),
+    ...(sideCheck?.sideChanged ? { sideChanged: sideCheck.sideChanged } : {}),
     ...(dossier ? { mainPath: dossier.mainPath, files: dossier.files } : {}),
     schema,
     xml,
@@ -804,6 +898,9 @@ export function editExample(current, content, metadata, setup, parseXml = parseX
   // correction could not write.
   if (content !== current.content || filesChanged || (metadata !== undefined && metadata !== (current.metadata ?? null))) delete edited.schemaLimit;
   if (metadata !== undefined) edited.metadata = metadata;
+  // "Dentro/fuera de X", Part 3: the side a hand edit is written for is the
+  // person's, never the one the correction round started from.
+  delete edited.relationIntended;
   edited.editedByUser =
     edited.content !== generated.content ||
     rootAttributesText(edited.rootAttributes) !== rootAttributesText(generated.rootAttributes) ||
@@ -1331,6 +1428,8 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     validation,
     result,
     matches,
+    // "Dentro/fuera de X", Part 3: run, shown, never counted.
+    ...(example.sideChanged ? { sideChanged: example.sideChanged } : {}),
     rejectedByBrexReference: rejectedByBrexReference(result),
     acceptance,
     predicateMiss: notApplicable || missingFiles ? false : predicateMiss,
@@ -1697,6 +1796,21 @@ function rejectedByBrexReference(result) {
 // -- the rule fails on a valid example; never "not executable".
 export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck = null, threshold = null, coverage = null) {
   if (analysis?.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason };
+  // "Dentro/fuera de X", Part 3: an example a fix moved to the other side
+  // of the relation the rule looks at never counts; with no other valid
+  // example left on its side the test is inconclusive -- never "incorrect".
+  const moved = runs.map((r, i) => (r?.sideChanged ? i : -1)).filter((i) => i >= 0);
+  if (moved.length > 0) {
+    for (const i of moved) {
+      const changed = runs[i].sideChanged;
+      const key = relationKey(changed);
+      const another = runs.some((r, j) => !r.sideChanged && r.result && r.result.status !== 'not_executable' && examples[j]?.relationSides?.[key] === changed.intended);
+      if (!another) {
+        return { kind: 'inconclusive', why: 'relation_side', element: changed.element, ancestor: changed.ancestor, axis: changed.axis, side: changed.intended };
+      }
+    }
+    runs = runs.map((r) => (r.sideChanged ? { ...r, result: null, matches: null, predicateMiss: false, schemaCovered: null } : r));
+  }
   const ran = runs.filter((r) => r.result);
   const notExecutable = ran.find((r) => r.result.status === 'not_executable');
   if (notExecutable) return { kind: 'not_executable', reason: notExecutable.result.notExecutableReason };
