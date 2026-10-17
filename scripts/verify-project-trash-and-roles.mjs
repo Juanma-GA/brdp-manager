@@ -152,8 +152,11 @@ async function main() {
     const permanent = page.getByRole("button", { name: "Delete permanently", exact: true }).last();
     assert(await permanent.isDisabled(), "Delete permanently waits for the name");
     await page.getByPlaceholder("Project name").fill(projectName);
+    // The row leaves at once (optimistic, HR20): wait for the server's answer.
+    const purged = page.waitForResponse((r) => r.request().method() === "DELETE" && /\/api\/trash\/projects\/[^/?]+$/.test(r.url()), { timeout: 20000 });
     await permanent.click();
     await clashRow.waitFor({ state: "detached", timeout: 20000 });
+    assert((await purged).ok(), "the server deleted the project");
     assert((await api(`/api/trash/projects`).then((r) => r.json())).every((p) => p.id !== clash.id), "deleted permanently");
 
     console.log("(c) Removing a role asks first");
