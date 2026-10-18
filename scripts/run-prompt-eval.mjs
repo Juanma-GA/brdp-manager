@@ -525,8 +525,9 @@ async function runCheck(check, answer, ctx = {}) {
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       const expect = check.expect || [];
       // Remates: `why` also pins the reason of an inconclusive verdict
-      // (e.g. skeleton_placement).
-      const ok = expect.includes(verdict.kind) && (!check.why || verdict.why === check.why);
+      // (e.g. skeleton_placement). An entry "kind:why" pins it for that kind
+      // only ("correct" or "inconclusive:relation_side").
+      const ok = (expect.includes(verdict.kind) && (!check.why || verdict.why === check.why)) || expect.includes(`${verdict.kind}:${verdict.why}`);
       return { status: ok ? "pass" : "fail", detail: `engine verdict ${verdict.kind}${verdict.why ? ` (${verdict.why})` : ""}, expected ${expect.join(" or ")}${check.why ? ` (${check.why})` : ""}: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_app_fixes": {

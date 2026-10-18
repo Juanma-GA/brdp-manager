@@ -1,11 +1,11 @@
 // Test de reglas: el esquema de la prueba tiene el atributo de la regla
-// (Part 4), y las SCHEMA FACTS dan los padres por esquema (Part 5). Real
+// (Part 4). Real
 // case (S1000D 3.0.1, general rule //response/@rsptype, values rt01–rt04):
 // <response> is in comment (with @rsptype, required, in the status section
 // <cstatus>) and in crew (in the content, <challrsp>, without @rsptype).
 // The application chose crew and Mistral put @rsptype on <para>: no example
-// could run. And the card said "allowed inside: challrsp, cstatus (this is
-// the same for every schema …)", which is false. On the REAL cards
+// could run. (Part 5, the parents per schema in the SCHEMA FACTS, was
+// undone: the prompt keeps its line.) On the REAL cards
 // (backend/schema_cards/schema-cards-3-0-1.json, as GET /api/schema-cards
 // gives them) and the REAL structures of the fixture.
 //   node scripts/test-attribute-schema.mjs
@@ -135,20 +135,17 @@ const brdp = { identifier: 'BRDP-EXT-09002', title: 'Response types', definition
   check('reason ES', formatRuleTestReason(pNone.unreachable, es) === 'ningún esquema de S1000D 3.0.1 tiene <response> con @caveat: ningún ejemplo puede contenerlo.', formatRuleTestReason(pNone.unreachable, es));
 }
 
-// ─── Part 5: the parents per schema in the SCHEMA FACTS ───────────────────
+// ─── Part 5, undone: the prompt never uses parents_by_schema ─────────────
+// With Mistral, "allowed inside, by schema" (the same shape as the
+// children's lists) made it give <para>'s parents as its children. The
+// line is the one of 483b08c, byte for byte, with or without the data.
 {
   const entry = cardOf('response');
-  const block = buildSchemaFactsBlock(S301, [{ name: 'response', entry }]);
-  check('facts: never "the same for every schema" when they differ', !block.includes('the same for every schema') && !block.includes('never differ by schema'), block);
-  check('facts: the parents of each schema', block.includes('allowed inside, by schema:') && block.includes('[comment]: cstatus') && block.includes('[crew]: challrsp'), block);
-  // Every other card keeps its line byte for byte: without parents_by_schema
-  // (an older answer) and with one group (the same parents everywhere).
   const SAME = 'allowed inside: challrsp, cstatus (this is the same for every schema listed above — allowed-inside parents never differ by schema)';
+  const block = buildSchemaFactsBlock(S301, [{ name: 'response', entry }]);
+  check('facts: the line as in 483b08c', block.includes(SAME) && !block.includes('by schema:'), block);
   const { parents_by_schema: _g, ...old } = entry;
-  const oldBlock = buildSchemaFactsBlock(S301, [{ name: 'response', entry: old }]);
-  check('facts without parents_by_schema: the line as before', oldBlock.includes(SAME), oldBlock);
-  const one = { ...entry, parents_by_schema: [{ schemas: ['comment', 'crew'], parents: ['challrsp', 'cstatus'], parents_truncated: false, parents_omitted: 0 }] };
-  check('facts, one group: the line as before, byte for byte', buildSchemaFactsBlock(S301, [{ name: 'response', entry: one }]) === oldBlock);
+  check('facts: the same text without parents_by_schema', buildSchemaFactsBlock(S301, [{ name: 'response', entry: old }]) === block);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

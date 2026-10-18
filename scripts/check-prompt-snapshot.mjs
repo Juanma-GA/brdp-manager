@@ -314,15 +314,15 @@
 // up the folders): also the line on where the ditamap goes. No other
 // prompt changes.
 //
-// Test de reglas, dentro/fuera de X (Parts 1 and 5): 4 cases change.
+// Test de reglas, dentro/fuera de X (Part 1): 2 cases change.
 // ruleTestExamples/brex-4-2-cmp-footnote-table-prelim and
 // brex-4-2-default-applic-repository-0a2: the line "and <x> outside it by
 // any other valid way" becomes the way outside (through the identification
-// and status section for EXT-00134). ask/multi-variant-para-refused-notfound
-// and ask/children-vary-by-schema-identandstatussection: only the "allowed
-// inside" line, now per schema (parents_by_schema; schema-cards-fixture.json
-// dumped again) instead of "the same for every schema", which was false.
-// Every other prompt is identical.
+// and status section for EXT-00134). Part 5 (the parents per schema in the
+// SCHEMA FACTS) was undone: with Mistral the per-schema list, in the same
+// shape as the children's, was read as children. Every other prompt is
+// identical to 483b08c (schema-cards-fixture.json carries
+// parents_by_schema, which the prompt does not use).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

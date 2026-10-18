@@ -6060,7 +6060,7 @@
     },
     {
       "id": "rule-test-3-0-1-seqlist-side-swap",
-      "description": "Dentro/fuera de X, Part 3: the correction moves the \"outside\" example to the other side (written in descript, inside <descript>). It no longer tests its case: not counted, and with no other outside example the test is inconclusive, never \"failed\". SIDESWAP makes the simulator answer that way.",
+      "description": "Dentro/fuera de X, Part 3: the correction moves the \"outside\" example to the other side (written in descript, inside <descript>). It no longer tests its case: not counted, and with no other outside example the test is inconclusive, never \"failed\". SIDESWAP makes the simulator answer that way. With the real Mistral there is usually no change of side and the test is correct: correct or inconclusive (relation_side) both pass, incorrect never.",
       "type": "rule-test",
       "standard": "S1000D 3.0.1",
       "rule": "<objrule>\n  <objpath objappl=\"0\">//descendant-or-self::seqlist[not(ancestor-or-self::descript)]</objpath>\n  <objuse>Sequential lists are only used in descriptive data modules.</objuse>\n</objrule>",
@@ -6078,10 +6078,10 @@
         {
           "type": "rule_test_verdict_in",
           "expect": [
-            "inconclusive"
+            "correct",
+            "inconclusive:relation_side"
           ],
-          "why": "relation_side",
-          "note": "the moved example is not counted"
+          "note": "the moved example is not counted; never incorrect"
         }
       ]
     },
@@ -6089,7 +6089,7 @@
       "id": "rule-test-3-0-1-response-rsptype",
       "type": "rule-test",
       "standard": "S1000D 3.0.1",
-      "description": "El atributo de la regla (Parts 4 and 5): general rule //response/@rsptype, values rt01-rt04. <response> is in comment (with @rsptype, required, in <cstatus>) and in crew (in <challrsp>, without @rsptype). The test used crew and Mistral put @rsptype on <para>: no example could run. Now the test schema is comment and the LLM writes the whole <cstatus>; the SCHEMA FACTS give the parents of <response> per schema, never \"the same for every schema\".",
+      "description": "El atributo de la regla (Part 4): general rule //response/@rsptype, values rt01-rt04. <response> is in comment (with @rsptype, required, in <cstatus>) and in crew (in <challrsp>, without @rsptype). The test used crew and Mistral put @rsptype on <para>: no example could run. Now the test schema is comment and the LLM writes the whole <cstatus>.",
       "brdp": {
         "identifier": "BRDP-EVAL-RT-RSPTYPE",
         "title": "Response types",
@@ -6113,18 +6113,6 @@
           "target": "prompt",
           "pattern": "every example uses the \"comment\" schema",
           "note": "a schema whose <response> has @rsptype"
-        },
-        {
-          "type": "contains",
-          "target": "prompt",
-          "pattern": "\\[comment\\]: cstatus",
-          "note": "the parents of <response> per schema"
-        },
-        {
-          "type": "not_contains",
-          "target": "prompt",
-          "pattern": "the same for every schema listed above — allowed-inside parents never differ",
-          "note": "the false claim is gone"
         },
         {
           "type": "rule_test_verdict_correct"
