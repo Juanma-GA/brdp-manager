@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:dc="http://www.purl.org/dc/elements/1.1/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xlink="http://www.w3.org/1999/xlink" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd">
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="LHTSTD" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="0A" infoCode="022" infoCodeVariant="A" itemLocationCode="D" />
+        <language languageIsoCode="sx" countryIsoCode="US" />
+        <issueInfo issueNumber="001" inWork="00" />
+      </dmIdent>
+      <dmAddressItems>
+        <issueDate year="2024" month="12" day="09" />
+        <dmTitle>
+          <techName>Project LHTSTD</techName>
+          <infoName>Business rules exchange data module</infoName>
+        </dmTitle>
+      </dmAddressItems>
+    </dmAddress>
+    <dmStatus issueType="new">
+      <security securityClassification="01"></security>
+      <dataRestrictions>
+        <restrictionInstructions>
+          <dataDistribution>For Lufthansa Technik Ag testing and demo purposes only.</dataDistribution>
+        </restrictionInstructions>
+        <restrictionInfo>
+          <copyright>
+            <copyrightPara>
+							<emphasis>Copyright (C) 2024</emphasis> by: <randomList><listItem><para>Lufthansa Technik AG.</para></listItem></randomList>
+						</copyrightPara>
+            <copyrightPara>
+							<emphasis>Limitations of Liability:</emphasis>
+						</copyrightPara>
+            <copyrightPara>
+							<randomList><listItem><para>This document and its content are copyright protected and either owned by or licensed to Lufthansa Technik AG. All rights reserved.</para></listItem><listItem><para>This document and the information contained herein shall be kept strictly confidential and shall not be used, disclosed to others or reproduced for any use other than the one they were provided for without the express written consent of Lufthansa Technik AG.</para></listItem></randomList>
+						</copyrightPara>
+          </copyright>
+        </restrictionInfo>
+      </dataRestrictions>
+      <responsiblePartnerCompany enterpriseCode="C1008">
+        
+      <enterpriseName>LUFTHANSA TECHNIK AG</enterpriseName></responsiblePartnerCompany>
+      <originator enterpriseCode="C1008">
+        
+      <enterpriseName>LUFTHANSA TECHNIK AG</enterpriseName></originator>
+      <applic>
+        <displayText>
+          <simplePara>ALL</simplePara>
+        </displayText>
+      </applic>
+      <brexDmRef>
+        <dmRef>
+          <dmRefIdent>
+            <dmCode modelIdentCode="ATABREX" systemDiffCode="F" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="0000" disassyCode="01" disassyCodeVariant="B" infoCode="022" infoCodeVariant="A" itemLocationCode="D" />
+          </dmRefIdent>
+        </dmRef>
+      </brexDmRef>
+      <qualityAssurance>
+        
+      <firstVerification verificationType="tabtop" /></qualityAssurance>
+      <reasonForUpdate id="rfu-001" updateReasonType="urt02" updateHighlight="1">
+        <simplePara>Data changed</simplePara>
+      </reasonForUpdate>
+    </dmStatus>
+  </identAndStatusSection>
+  <content>
+    <brex>
+      <contextRules>
+<structureObjectRule>
+            <objectPath allowedObjectFlag="0"> //dmCode/@infoCode="000" or //dmCode/@infoCode="002" or //dmCode/@infoCode="010" or //dmCode/@infoCode="011" or //dmCode/@infoCode="014" or //dmCode/@infoCode="015" or //dmCode/@infoCode="016" or //dmCode/@infoCode="017" or //dmCode/@infoCode="019" or //dmCode/@infoCode="024" or //dmCode/@infoCode="028" or //dmCode/@infoCode="02A" or //dmCode/@infoCode="02B" or //dmCode/@infoCode="030" or //dmCode/@infoCode="031" or //dmCode/@infoCode="033" or //dmCode/@infoCode="034" or //dmCode/@infoCode="040" or //dmCode/@infoCode="043" or //dmCode/@infoCode="045" or //dmCode/@infoCode="046" or //dmCode/@infoCode="059" or //dmCode/@infoCode="060" or //dmCode/@infoCode="061" or //dmCode/@infoCode="062" or //dmCode/@infoCode="063" or //dmCode/@infoCode="064" or //dmCode/@infoCode="065" or //dmCode/@infoCode="066" or //dmCode/@infoCode="067" or //dmCode/@infoCode="070" or //dmCode/@infoCode="071" or //dmCode/@infoCode="072" or //dmCode/@infoCode="073" or //dmCode/@infoCode="074" or //dmCode/@infoCode="075" or //dmCode/@infoCode="076" or //dmCode/@infoCode="077" or //dmCode/@infoCode="078" or //dmCode/@infoCode="080" or //dmCode/@infoCode="081" or //dmCode/@infoCode="082" or //dmCode/@infoCode="090" or //dmCode/@infoCode="096" or //dmCode/@infoCode="00M" or //dmCode/@infoCode="00P" or //dmCode/@infoCode="00Q" or //dmCode/@infoCode="00Y" or //dmCode/@infoCode="0A2" or //dmCode/@infoCode="0A3" or //dmCode/@infoCode="0B0" or //dmCode/@infoCode="0B1" or //dmCode/@infoCode="0B2" or //dmCode/@infoCode="0B3" or //dmCode/@infoCode="0B4" or //dmCode/@infoCode="0B5" or //dmCode/@infoCode="100" or //dmCode/@infoCode="101" or //dmCode/@infoCode="102" or //dmCode/@infoCode="103" or //dmCode/@infoCode="104" or //dmCode/@infoCode="105" or //dmCode/@infoCode="106" or //dmCode/@infoCode="107" or //dmCode/@infoCode="110" or //dmCode/@infoCode="115" or //dmCode/@infoCode="120" or //dmCode/@infoCode="122" or //dmCode/@infoCode="123" or //dmCode/@infoCode="126" or //dmCode/@infoCode="130" or //dmCode/@infoCode="132" or //dmCode/@infoCode="133" or //dmCode/@infoCode="134" or //dmCode/@infoCode="136" or //dmCode/@infoCode="138" or //dmCode/@infoCode="139" or //dmCode/@infoCode="140" or //dmCode/@infoCode="142" or //dmCode/@infoCode="143" or //dmCode/@infoCode="144" or //dmCode/@infoCode="150" or //dmCode/@infoCode="157" or //dmCode/@infoCode="160" or //dmCode/@infoCode="169" or //dmCode/@infoCode="170" or //dmCode/@infoCode="171" or //dmCode/@infoCode="172" or //dmCode/@infoCode="173" or //dmCode/@infoCode="176" or //dmCode/@infoCode="177" or //dmCode/@infoCode="178" or //dmCode/@infoCode="180" or //dmCode/@infoCode="181" or //dmCode/@infoCode="210" or //dmCode/@infoCode="211" or //dmCode/@infoCode="212" or //dmCode/@infoCode="213" or //dmCode/@infoCode="214" or //dmCode/@infoCode="215" or //dmCode/@infoCode="216" or //dmCode/@infoCode="217" or //dmCode/@infoCode="218" or //dmCode/@infoCode="219" or //dmCode/@infoCode="220" or //dmCode/@infoCode="221" or //dmCode/@infoCode="222" or //dmCode/@infoCode="223" or //dmCode/@infoCode="224" or //dmCode/@infoCode="225" or //dmCode/@infoCode="226" or //dmCode/@infoCode="227" or //dmCode/@infoCode="228" or //dmCode/@infoCode="229" or //dmCode/@infoCode="230" or //dmCode/@infoCode="231" or //dmCode/@infoCode="232" or //dmCode/@infoCode="233" or //dmCode/@infoCode="234" or //dmCode/@infoCode="236" or //dmCode/@infoCode="237" or //dmCode/@infoCode="241" or //dmCode/@infoCode="242" or //dmCode/@infoCode="243" or //dmCode/@infoCode="251" or //dmCode/@infoCode="252" or //dmCode/@infoCode="253" or //dmCode/@infoCode="254" or //dmCode/@infoCode="255" or //dmCode/@infoCode="256" or //dmCode/@infoCode="257" or //dmCode/@infoCode="258" or //dmCode/@infoCode="259" or //dmCode/@infoCode="261" or //dmCode/@infoCode="262" or //dmCode/@infoCode="263" or //dmCode/@infoCode="264" or //dmCode/@infoCode="288" or //dmCode/@infoCode="289" or //dmCode/@infoCode="292" or //dmCode/@infoCode="293" or //dmCode/@infoCode="294" or //dmCode/@infoCode="295" or //dmCode/@infoCode="296" or //dmCode/@infoCode="297" or //dmCode/@infoCode="298" or //dmCode/@infoCode="299" or //dmCode/@infoCode="301" or //dmCode/@infoCode="302" or //dmCode/@infoCode="303" or //dmCode/@infoCode="304" or //dmCode/@infoCode="305" or //dmCode/@infoCode="306" or //dmCode/@infoCode="307" or //dmCode/@infoCode="311" or //dmCode/@infoCode="312" or //dmCode/@infoCode="315" or //dmCode/@infoCode="321" or //dmCode/@infoCode="322" or //dmCode/@infoCode="331" or //dmCode/@infoCode="332" or //dmCode/@infoCode="333" or //dmCode/@infoCode="334" or //dmCode/@infoCode="335" or //dmCode/@infoCode="343" or //dmCode/@infoCode="344" or //dmCode/@infoCode="345" or //dmCode/@infoCode="346" or //dmCode/@infoCode="347" or //dmCode/@infoCode="348" or //dmCode/@infoCode="349" or //dmCode/@infoCode="351" or //dmCode/@infoCode="352" or //dmCode/@infoCode="353" or //dmCode/@infoCode="354" or //dmCode/@infoCode="355" or //dmCode/@infoCode="356" or //dmCode/@infoCode="357" or //dmCode/@infoCode="358" or //dmCode/@infoCode="359" or //dmCode/@infoCode="371" or //dmCode/@infoCode="372" or //dmCode/@infoCode="373" or //dmCode/@infoCode="374" or //dmCode/@infoCode="376" or //dmCode/@infoCode="377" or //dmCode/@infoCode="378" or //dmCode/@infoCode="379" or //dmCode/@infoCode="380" or //dmCode/@infoCode="381" or //dmCode/@infoCode="382" or //dmCode/@infoCode="383" or //dmCode/@infoCode="384" or //dmCode/@infoCode="385" or //dmCode/@infoCode="386" or //dmCode/@infoCode="387" or //dmCode/@infoCode="388" or //dmCode/@infoCode="389" or //dmCode/@infoCode="401" or //dmCode/@infoCode="402" or //dmCode/@infoCode="403" or //dmCode/@infoCode="404" or //dmCode/@infoCode="405" or //dmCode/@infoCode="406" or //dmCode/@infoCode="407" or //dmCode/@infoCode="411" or //dmCode/@infoCode="412" or //dmCode/@infoCode="413" or //dmCode/@infoCode="414" or //dmCode/@infoCode="415" or //dmCode/@infoCode="420" or //dmCode/@infoCode="429" or //dmCode/@infoCode="443" or //dmCode/@infoCode="521" or //dmCode/@infoCode="522" or //dmCode/@infoCode="523" or //dmCode/@infoCode="524" or //dmCode/@infoCode="531" or //dmCode/@infoCode="561" or //dmCode/@infoCode="562" or //dmCode/@infoCode="563" or //dmCode/@infoCode="611" or //dmCode/@infoCode="612" or //dmCode/@infoCode="613" or //dmCode/@infoCode="614" or //dmCode/@infoCode="615" or //dmCode/@infoCode="621" or //dmCode/@infoCode="622" or //dmCode/@infoCode="623" or //dmCode/@infoCode="624" or //dmCode/@infoCode="625" or //dmCode/@infoCode="626" or //dmCode/@infoCode="627" or //dmCode/@infoCode="631" or //dmCode/@infoCode="632" or //dmCode/@infoCode="633" or //dmCode/@infoCode="634" or //dmCode/@infoCode="635" or //dmCode/@infoCode="636" or //dmCode/@infoCode="638" or //dmCode/@infoCode="639" or //dmCode/@infoCode="641" or //dmCode/@infoCode="642" or //dmCode/@infoCode="643" or //dmCode/@infoCode="644" or //dmCode/@infoCode="645" or //dmCode/@infoCode="646" or //dmCode/@infoCode="647" or //dmCode/@infoCode="648" or //dmCode/@infoCode="649" or //dmCode/@infoCode="651" or //dmCode/@infoCode="652" or //dmCode/@infoCode="653" or //dmCode/@infoCode="654" or //dmCode/@infoCode="655" or //dmCode/@infoCode="656" or //dmCode/@infoCode="657" or //dmCode/@infoCode="658" or //dmCode/@infoCode="659" or //dmCode/@infoCode="662" or //dmCode/@infoCode="663" or //dmCode/@infoCode="664" or //dmCode/@infoCode="666" or //dmCode/@infoCode="667" or //dmCode/@infoCode="668" or //dmCode/@infoCode="669" or //dmCode/@infoCode="670" or //dmCode/@infoCode="671" or //dmCode/@infoCode="681" or //dmCode/@infoCode="682" or //dmCode/@infoCode="683" or //dmCode/@infoCode="684" or //dmCode/@infoCode="685" or //dmCode/@infoCode="686" or //dmCode/@infoCode="689" or //dmCode/@infoCode="711" or //dmCode/@infoCode="712" or //dmCode/@infoCode="713" or //dmCode/@infoCode="714" or //dmCode/@infoCode="721" or //dmCode/@infoCode="722" or //dmCode/@infoCode="723" or //dmCode/@infoCode="724" or //dmCode/@infoCode="761" or //dmCode/@infoCode="762" or //dmCode/@infoCode="801" or //dmCode/@infoCode="802" or //dmCode/@infoCode="803" or //dmCode/@infoCode="804" or //dmCode/@infoCode="805" or //dmCode/@infoCode="806" or //dmCode/@infoCode="807" or //dmCode/@infoCode="811" or //dmCode/@infoCode="812" or //dmCode/@infoCode="832" or //dmCode/@infoCode="842" or //dmCode/@infoCode="860" or //dmCode/@infoCode="901" or //dmCode/@infoCode="902" or //dmCode/@infoCode="903" or //dmCode/@infoCode="904" or //dmCode/@infoCode="905" or //dmCode/@infoCode="906" or //dmCode/@infoCode="907" or //dmCode/@infoCode="910" or //dmCode/@infoCode="911" or //dmCode/@infoCode="913" or //dmCode/@infoCode="914" or //dmCode/@infoCode="915" or //dmCode/@infoCode="916" or //dmCode/@infoCode="920" or //dmCode/@infoCode="921" or //dmCode/@infoCode="922" or //dmCode/@infoCode="923" or //dmCode/@infoCode="933" or //dmCode/@infoCode="934" or //dmCode/@infoCode="940" or //dmCode/@infoCode="950" or //dmCode/@infoCode="961" or //dmCode/@infoCode="970" or //dmCode/@infoCode="992" or //dmCode/@infoCode="998" or //dmCode/@infoCode="C00" or //dmCode/@infoCode="C01" or //dmCode/@infoCode="C02" or //dmCode/@infoCode="C03" or //dmCode/@infoCode="C04" or //dmCode/@infoCode="C05" or //dmCode/@infoCode="C06" or //dmCode/@infoCode="C07" or //dmCode/@infoCode="C13" or //dmCode/@infoCode="C14" or //dmCode/@infoCode="C15" or //dmCode/@infoCode="C20" or //dmCode/@infoCode="C21" or //dmCode/@infoCode="C22" or //dmCode/@infoCode="C23" or //dmCode/@infoCode="C25" or //dmCode/@infoCode="C26" or //dmCode/@infoCode="C27" or //dmCode/@infoCode="C30" or //dmCode/@infoCode="C31" or //dmCode/@infoCode="C32" or //dmCode/@infoCode="C33" or //dmCode/@infoCode="C34" or //dmCode/@infoCode="C35" or //dmCode/@infoCode="C36" or //dmCode/@infoCode="C50" or //dmCode/@infoCode="C51" or //dmCode/@infoCode="C52" or //dmCode/@infoCode="C53" or //dmCode/@infoCode="C60" or //dmCode/@infoCode="C61" or //dmCode/@infoCode="C62" or //dmCode/@infoCode="C70" or //dmCode/@infoCode="C72" or //dmCode/@infoCode="C73" or //dmCode/@infoCode="C74" or //dmCode/@infoCode="C75" or //dmCode/@infoCode="C90" or //dmCode/@infoCode="C91" or //dmCode/@infoCode="C92" or //dmCode/@infoCode="C95" or //dmCode/@infoCode="C96"</objectPath>
+            <objectUse>BRDP-S1-00052. Decision by Company. </objectUse>
+          </structureObjectRule>
+<structureObjectRule>
+                  <objectPath allowedObjectFlag="2">//dmCode[@infoCode="001" or @infoCode="003" or  @infoCode="005" or  @infoCode="006" or  @infoCode="007" or  @infoCode="008" or  @infoCode="009" or  @infoCode="012" or  @infoCode="013" or  @infoCode="018" or @infoCode="020" or @infoCode="021" or @infoCode="022" or @infoCode="023" or @infoCode="041" or @infoCode="042" or @infoCode="044" or @infoCode="050" or @infoCode="051" or @infoCode="052" or @infoCode="053" or @infoCode="054" or @infoCode="055" or @infoCode="056" or @infoCode="057" or @infoCode="058" or @infoCode="00C" or @infoCode="00D" or @infoCode="00G" or @infoCode="00K" or @infoCode="00L" or @infoCode="00N" or @infoCode="00T" or @infoCode="00U" or @infoCode="00W" or @infoCode="00Z" or @infoCode="0A4" or @infoCode="0A5" or @infoCode="200" or @infoCode="201" or @infoCode="202" or @infoCode="203" or @infoCode="204" or @infoCode="205" or @infoCode="206" or @infoCode="207" or @infoCode="240" or @infoCode="250" or @infoCode="260" or @infoCode="270" or @infoCode="271" or @infoCode="272" or @infoCode="273" or @infoCode="274" or @infoCode="275" or @infoCode="276" or @infoCode="277" or @infoCode="280" or @infoCode="281" or @infoCode="282" or @infoCode="283" or @infoCode="284" or @infoCode="285" or @infoCode="286" or @infoCode="290" or @infoCode="300" or @infoCode="310" or @infoCode="320" or @infoCode="330" or @infoCode="340" or @infoCode="341" or @infoCode="342" or @infoCode="350" or @infoCode="360" or @infoCode="361" or @infoCode="362" or @infoCode="363" or @infoCode="364" or @infoCode="365" or @infoCode="366" or @infoCode="367" or @infoCode="368" or @infoCode="369" or @infoCode="370" or @infoCode="390" or @infoCode="398" or @infoCode="400" or @infoCode="410" or @infoCode="430" or @infoCode="440" or @infoCode="441" or @infoCode="442" or @infoCode="500" or @infoCode="501" or @infoCode="502" or @infoCode="503" or @infoCode="504" or @infoCode="505" or @infoCode="506" or @infoCode="507" or @infoCode="510" or @infoCode="520" or @infoCode="530" or @infoCode="550" or @infoCode="551" or @infoCode="552" or @infoCode="553" or @infoCode="560" or @infoCode="600" or @infoCode="601" or @infoCode="602" or @infoCode="603" or @infoCode="604" or @infoCode="605" or @infoCode="606" or @infoCode="607" or @infoCode="610" or @infoCode="620" or @infoCode="630" or @infoCode="640" or @infoCode="650" or @infoCode="660" or @infoCode="661" or @infoCode="690" or @infoCode="691" or @infoCode="692" or @infoCode="693" or @infoCode="700" or @infoCode="701" or @infoCode="702" or @infoCode="703" or @infoCode="704" or @infoCode="705" or @infoCode="706" or @infoCode="707" or @infoCode="710" or @infoCode="720" or @infoCode="730" or @infoCode="750" or @infoCode="752" or @infoCode="760" or @infoCode="800" or @infoCode="810" or @infoCode="820" or @infoCode="830" or @infoCode="840" or @infoCode="850" or @infoCode="870" or @infoCode="880" or @infoCode="890" or @infoCode="900" or @infoCode="930" or @infoCode="941" or @infoCode="942" or @infoCode="997"]</objectPath>
+                  <objectUse>BRDP-S1-00052. Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP. </objectUse>
+               </structureObjectRule>
+<structureObjectRule>
+            <objectPath allowedObjectFlag="0">//caption</objectPath>
+            <objectUse>BRDP-S1-00117. Decision by Company. </objectUse>
+          </structureObjectRule>
+      </contextRules>
+      <nonContextRules>
+<nonContextRule>
+          <simplePara>BRDP-S1-00117. Decide whether inline captions affect the text line spacing and how this is defined </simplePara>
+          <simplePara>Decision made by Project. Captions shall not be used.</simplePara>
+        </nonContextRule>
+<nonContextRule>
+          <simplePara>BRDP-S1-00037. Decide whether the use of LOEP or LOEDM. </simplePara>
+          <simplePara>Decision made by Project. LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM.</simplePara>
+        </nonContextRule>
+      </nonContextRules>
+    </brex>
+  </content>
+</dmodule>

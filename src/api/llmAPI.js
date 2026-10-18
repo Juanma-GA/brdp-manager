@@ -1,89 +1,11 @@
-/**
- * Build headers based on LLM provider
- * @param {string} provider - Provider name ('Anthropic', 'OpenAI', 'Custom')
- * @param {string} apiKey - API key
- * @returns {Object} Headers object
- */
-function buildHeaders(provider, apiKey) {
-  const baseHeaders = {
-    'content-type': 'application/json',
-  };
+import { authFetch } from '../services/apiClient.js';
+import { ApiError, apiErrorFromResponse, networkError } from '../services/apiErrors.js';
+import i18n from '../i18n/index.js';
+import { LLM_TRUNCATED, isTruncatedAnswer, truncatedAnswerError } from './llmTruncation.js';
+import { LLM_CANCELLED, sendWithRateLimitRetry } from './llmRateLimit.js';
+import { DEFAULT_MAX_TOKENS, answerContent, buildRequestBody } from './llmRequest.js';
 
-  if (provider === 'Anthropic') {
-    return {
-      ...baseHeaders,
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    };
-  }
-
-  // OpenAI and Custom providers use Bearer token
-  return {
-    ...baseHeaders,
-    'Authorization': `Bearer ${apiKey}`,
-  };
-}
-
-/**
- * Build request body based on provider
- * @param {string} provider - Provider name
- * @param {string} modelName - Model name
- * @param {Array} messages - Message history
- * @param {string} systemPrompt - System prompt
- * @param {number} temperature - Temperature parameter for sampling
- * @returns {Object} Request body
- */
-function buildRequestBody(provider, modelName, messages, systemPrompt, temperature) {
-  const baseBody = {
-    model: modelName,
-    max_tokens: 4000,
-    temperature,
-  };
-
-  if (provider === 'Anthropic') {
-    return {
-      ...baseBody,
-      system: systemPrompt,
-      messages,
-    };
-  }
-
-  // OpenAI and Custom providers include system in messages
-  return {
-    ...baseBody,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...messages,
-    ],
-  };
-}
-
-/**
- * Build system prompt with optional BRDP context
- * @param {Object} [selectedBrdp] - Selected BRDP record
- * @returns {string} System prompt
- */
-function buildSystemPrompt(selectedBrdp) {
-  const basePrompt = `You are an S1000D / DITA and BRDP expert assistant.
-You help users understand business rules, validate decisions,
-and answer questions about S1000D and DITA, and technical
-publications. If a BRDP record is provided, use it as
-context for your answers.`;
-
-  if (!selectedBrdp) {
-    return basePrompt;
-  }
-
-  return `${basePrompt}
-
-Current BRDP context:
-ID: ${selectedBrdp.id}
-Definition: ${selectedBrdp.definition}
-Proposal: ${selectedBrdp.proposal}
-Validation: ${selectedBrdp.validation}
-Comment: ${selectedBrdp.comment}`;
-}
+export { LLM_CANCELLED };
 
 /**
  * Send a message to the configured LLM provider
@@ -94,7 +16,10 @@ Comment: ${selectedBrdp.comment}`;
  * @param {string} [systemPrompt=""] - System prompt (optional, defaults to empty string)
  * @param {Object} [options={}] - Optional parameters
  * @param {number} [options.temperature=1] - Temperature parameter for sampling
- * @param {string} [options.customEndpoint=""] - Custom endpoint override
+ * @param {number} [options.maxTokens] - Output limit of the answer
+ * @param {Function} [options.shouldCancel] - () => true once the operation
+ *   was cancelled: ends a wait for the per-minute limit with LLM_CANCELLED
+ *   and sends nothing more (Protecciones 2a, llmRateLimit.js)
  * @returns {Promise<Object>} Response from LLM
  * @throws {Error} If the request fails
  */
@@ -106,225 +31,51 @@ export async function sendMessage(
   systemPrompt = "",
   options = {}
 ) {
-  const { temperature = 1, customEndpoint = "" } = options;
+  const { temperature = 1, maxTokens = DEFAULT_MAX_TOKENS, shouldCancel } = options;
 
-  if (!apiKey || !modelName || !provider) {
-    throw new Error('Missing API configuration. Please configure in Settings.');
+  if (!modelName || !provider) {
+    throw new Error(i18n.t('errors.llmMissingModel'));
   }
 
-  let endpoint = 'https://api.anthropic.com/v1/messages';
-  if (provider === 'OpenAI') {
-    endpoint = 'https://api.openai.com/v1/chat/completions';
-  }
-  if (provider === 'Mistral') {
-    endpoint = 'https://api.mistral.ai/v1/chat/completions';
-  }
-  if (provider === 'Custom') {
-    endpoint = 'https://api.example.com/v1/messages';
-  }
-  if (customEndpoint && customEndpoint.trim()) {
-    const base = customEndpoint.trim().replace(/\/$/, '');
-    endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
-  }
+  // v2: the backend resolves the real provider endpoint + API key from its
+  // own server-side config (docs/v2 §4.2 -- closes the SSRF finding by
+  // construction, since targetEndpoint/apiKey never travel from the
+  // client). This is the ONLY thing that changed here versus v1 -- prompt
+  // construction (buildRequestBody) is untouched.
+  const payload = buildRequestBody(provider, messages, systemPrompt, temperature, maxTokens);
 
-  const realEndpoint = endpoint; // save before proxy override
+  // Over the per-minute limit of AI requests the request waits and is sent
+  // again by itself; over the per-day limit its error is thrown, with the
+  // limit and when to try again (Protecciones 2a). The only place in the
+  // app that sends to the LLM, so every use gets the same behaviour.
+  return sendWithRateLimitRetry(() => sendOnce(provider, payload), { shouldCancel });
+}
 
-  if (import.meta.env.PROD) {
-    endpoint = '/api/proxy';
-  } else if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
-    endpoint = '/mistral-proxy/chat/completions';
-  }
-
-  const headers = buildHeaders(provider, apiKey);
-  const payload = buildRequestBody(provider, modelName, messages, systemPrompt, temperature);
-
-  // In production, wrap the payload with routing metadata for the Express proxy
-  const isProxy = import.meta.env.PROD;
-  const fetchHeaders = isProxy ? { 'Content-Type': 'application/json' } : headers;
-  const fetchBody = isProxy
-    ? JSON.stringify({ targetEndpoint: realEndpoint, apiKey, provider, payload })
-    : JSON.stringify(payload);
-
+async function sendOnce(provider, payload) {
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: fetchHeaders,
-      body: fetchBody,
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Invalid API key. Please check your Settings.');
-      }
-      throw new Error('Connection error. Please try again.');
+    let response;
+    try {
+      response = await authFetch('/api/llm-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload }),
+      });
+    } catch (err) {
+      throw networkError(err);
     }
+
+    // The server's reason as a sentence (a parameter it refuses, the
+    // provider unavailable, ...), with its reference -- never its text.
+    if (!response.ok) throw await apiErrorFromResponse(response);
 
     const data = await response.json();
+    if (isTruncatedAnswer(provider, data)) throw truncatedAnswerError();
 
-    // Extract message content based on provider response format
-    if (provider === 'Anthropic') {
-      return {
-        role: 'assistant',
-        content: data.content[0].text,
-      };
-    }
-
-    // OpenAI and Custom
-    return {
-      role: 'assistant',
-      content: data.choices[0].message.content,
-    };
+    return { role: 'assistant', content: answerContent(provider, data) };
   } catch (error) {
-    if (error.message.includes('Invalid API key') ||
-        error.message.includes('Connection error')) {
+    if (error.code === LLM_TRUNCATED || error instanceof ApiError) {
       throw error;
     }
-    throw new Error('Connection error. Please try again.');
+    throw new Error(i18n.t('errors.network'), { cause: error });
   }
 }
-
-/**
- * Stream a message from the configured LLM provider
- * @param {Array} messages - Message history
- * @param {string} apiKey - API key
- * @param {string} modelName - Model name
- * @param {string} provider - LLM provider
- * @param {string} [systemPrompt=""] - System prompt
- * @param {Function} onChunk - Callback for each token received
- * @param {AbortController} abortController - Controller to cancel request
- * @param {Object} [options={}] - Optional parameters
- * @param {number} [options.temperature=1] - Temperature parameter for sampling
- * @param {string} [options.customEndpoint=""] - Custom endpoint override
- * @returns {Promise<string>} Complete response text
- * @throws {Error} If the request fails
- */
-export async function sendMessageStream(
-  messages,
-  apiKey,
-  modelName,
-  provider,
-  systemPrompt = "",
-  onChunk,
-  abortController,
-  options = {}
-) {
-  const { temperature = 1, customEndpoint = "" } = options;
-
-  if (!apiKey || !modelName || !provider) {
-    throw new Error('Missing API configuration. Please configure in Settings.');
-  }
-
-  let endpoint = 'https://api.anthropic.com/v1/messages';
-  if (provider === 'OpenAI') {
-    endpoint = 'https://api.openai.com/v1/chat/completions';
-  }
-  if (provider === 'Mistral') {
-    endpoint = 'https://api.mistral.ai/v1/chat/completions';
-  }
-  if (provider === 'Custom') {
-    endpoint = 'https://api.example.com/v1/messages';
-  }
-  if (customEndpoint && customEndpoint.trim()) {
-    const base = customEndpoint.trim().replace(/\/$/, '');
-    endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
-  }
-
-  const realEndpoint = endpoint; // save before proxy override
-
-  if (import.meta.env.PROD) {
-    endpoint = '/api/proxy';
-  } else if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
-    endpoint = '/mistral-proxy/chat/completions';
-  }
-
-  const headers = buildHeaders(provider, apiKey);
-  const payload = buildRequestBody(provider, modelName, messages, systemPrompt, temperature);
-
-  // In production, wrap the payload with routing metadata for the Express proxy
-  const isProxy = import.meta.env.PROD;
-  const fetchHeaders = isProxy ? { 'Content-Type': 'application/json' } : headers;
-  const fetchBody = isProxy
-    ? JSON.stringify({ targetEndpoint: realEndpoint, apiKey, provider, payload: { ...payload, stream: true } })
-    : JSON.stringify({ ...payload, stream: true });
-
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: fetchHeaders,
-      body: fetchBody,
-      signal: abortController?.signal,
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Invalid API key. Please check your Settings.');
-      }
-      throw new Error('Connection error. Please try again.');
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-
-        // Parse streaming response based on provider
-        if (provider === 'Anthropic') {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === 'content_block_delta' && data.delta?.type === 'text_delta') {
-                const text = data.delta.text;
-                fullContent += text;
-                onChunk?.(text);
-              }
-            } catch (e) {
-              // Skip parsing errors
-            }
-          }
-        } else {
-          // OpenAI and Custom providers
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) {
-                fullContent += content;
-                onChunk?.(content);
-              }
-            } catch (e) {
-              // Skip parsing errors
-            }
-          }
-        }
-      }
-    }
-
-    return fullContent;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error('Request cancelled by user.');
-    }
-    if (error.message.includes('Invalid API key') ||
-        error.message.includes('Connection error')) {
-      throw error;
-    }
-    throw new Error('Connection error. Please try again.');
-  }
-}
-
-/**
- * Export system prompt builder for external use
- */
-export { buildSystemPrompt };
