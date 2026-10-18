@@ -14,7 +14,7 @@ Business Rules Decision Points (BRDP) management for S1000D and DITA technical d
 ## Requirements
 
 - **Node.js** 20 or higher, **npm** 9 or higher (frontend)
-- **Python** 3.11 or higher and **PostgreSQL** with the `pgvector` extension (backend)
+- **Python** 3.11 or higher and **PostgreSQL** 15 or higher (tested with 15 and 16) with the `pgvector` extension (backend); server installation and moving the data to an older PostgreSQL: [`docs/instalacion/`](docs/instalacion/README.md)
 
 ## Installation
 

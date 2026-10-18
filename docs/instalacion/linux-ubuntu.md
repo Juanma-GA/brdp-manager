@@ -6,24 +6,48 @@ Antes de empezar, lee [README.md](README.md): requisitos, por qué hace falta HT
 
 **Probado** de principio a fin en un Ubuntu 24.04 limpio (PostgreSQL 16.15, pgvector 0.6.0, Python 3.12, Node 22, nginx 1.24). Ubuntu 22.04 y Debian 12 solo cambian en el paso 1 (de dónde salen Python y PostgreSQL); ese paso está revisado, no ejecutado en esas versiones.
 
+**Servidor de ATEXIS** (confirmado por IT): Ubuntu 24.04.4 LTS, **PostgreSQL 15.19 ya instalado**, `postgresql-15-pgvector` disponible en su `apt`, nginx 1.24.0 y acceso directo a `api.mistral.ai`, sin proxy ni inspección SSL. Para él: paso 1 «Si PostgreSQL ya está instalado» (no se instala la 16), sin el paso 4.4, y los datos se traen por la sección 7 de [migracion-datos.md](migracion-datos.md) (el portátil tiene la 16).
+
 Convenciones:
 
 - Todo se ejecuta como un usuario con `sudo`.
 - `brdp.example.local` es el nombre del servidor: cámbialo por el real.
 - Los valores entre `<…>` son tuyos: `<CONTRASEÑA_BD>`, `<CLAVE_MISTRAL>`, `<CORREO_ADMIN>`.
 - Rutas: el código en `/opt/brdp/app`, el frontend compilado en `/var/www/brdp`, los certificados en `/etc/ssl/brdp`.
+- `PGV` es la versión mayor de PostgreSQL del servidor (`15` en el de ATEXIS, `16` en un Ubuntu 24.04 limpio). Las rutas y los paquetes de PostgreSQL llevan esa versión: `postgresql-$PGV-pgvector`, `/etc/postgresql/$PGV/main/`, `/usr/lib/postgresql/$PGV/bin/`, servicio `postgresql@$PGV-main`. Defínela en la sesión antes de los pasos 1 y 2 (`PGV=15`, o la que diga `pg_lsclusters`).
 
 ---
 
 ## 1. Paquetes
 
-**Ubuntu 24.04** (todo viene en los repositorios del sistema):
+**Si PostgreSQL ya está instalado** (el servidor de ATEXIS: PostgreSQL 15.19): se usa ese. **No instales la 16 a su lado**: tendrías dos servidores de PostgreSQL y el segundo escucharía en otro puerto (5433). Mira cuál hay:
+
+```bash
+pg_lsclusters             # Ver Cluster Port Status ...  →  15 main 5432 online ...
+psql --version            # psql (PostgreSQL) 15.19 ...
+```
+
+Con la versión que salga (aquí, 15):
+
+```bash
+PGV=15
+sudo apt update
+sudo apt install -y git curl nginx openssl \
+                    postgresql-$PGV-pgvector \
+                    python3.12 python3.12-venv
+systemctl status postgresql@$PGV-main     # active (running)
+```
+
+El paquete de pgvector tiene que ser el de **la misma versión** que el servidor (`postgresql-15-pgvector` para la 15): el de otra versión no instala la extensión donde la busca la 15. Sigue en el paso 2 (el Node.js de abajo también hace falta).
+
+**Ubuntu 24.04 sin PostgreSQL** (todo viene en los repositorios del sistema, que traen la 16):
 
 ```bash
 sudo apt update
 sudo apt install -y git curl nginx openssl \
                     postgresql-16 postgresql-16-pgvector \
                     python3.12 python3.12-venv
+PGV=16
 ```
 
 **Ubuntu 22.04**: Python 3.10 y PostgreSQL 14 son demasiado viejos. Añade los repositorios de PostgreSQL (PGDG) y de Python (deadsnakes):
@@ -39,9 +63,10 @@ echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] h
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt update
 sudo apt install -y postgresql-16 postgresql-16-pgvector python3.11 python3.11-venv
+PGV=16
 ```
 
-**Debian 12**: trae Python 3.11 (`python3.11 python3.11-venv`). Para PostgreSQL 16 y pgvector, añade el repositorio PGDG igual que en 22.04 (las cuatro líneas de PostgreSQL de arriba) e instala `postgresql-16 postgresql-16-pgvector`.
+**Debian 12**: trae Python 3.11 (`python3.11 python3.11-venv`). Para PostgreSQL 16 y pgvector, añade el repositorio PGDG igual que en 22.04 (las cuatro líneas de PostgreSQL de arriba) e instala `postgresql-16 postgresql-16-pgvector` (`PGV=16`).
 
 **Node.js 22** (solo para compilar el frontend), en las tres:
 
@@ -65,12 +90,14 @@ Antes de crear nada:
 sudo -u postgres psql -Atc "SELECT name, default_version FROM pg_available_extensions WHERE name = 'vector';"
 ```
 
-Tiene que devolver una línea (`vector|0.6.0` o parecido). Si no devuelve nada, falta el paquete `postgresql-16-pgvector` (paso 1). Sin él, la migración y el paso siguiente fallan con:
+Tiene que devolver una línea (`vector|0.6.0` o parecido). Si no devuelve nada, falta el paquete `postgresql-$PGV-pgvector` de tu versión (paso 1; `postgresql-15-pgvector` en el servidor de ATEXIS). Sin él, la migración y el paso siguiente fallan con (en la 15, `…/postgresql/15/extension/…`):
 
 ```
 ERROR:  extension "vector" is not available
 DETAIL:  Could not open extension control file "/usr/share/postgresql/16/extension/vector.control": No such file or directory.
 ```
+
+Comprueba que el fichero está en la versión del servidor: `ls /usr/share/postgresql/$PGV/extension/vector.control`.
 
 ### 2.2 Crear el usuario y la base
 
@@ -85,9 +112,9 @@ SQL
 
 La extensión la crea `postgres` porque `brdp` no es superusuario: si lo intentara `brdp`, saldría `permission denied to create extension "vector"`. La migración `0001` vuelve a pedirla con `IF NOT EXISTS`, así que no falla.
 
-PostgreSQL de Ubuntu acepta contraseña desde `127.0.0.1` (`scram-sha-256` en `/etc/postgresql/16/main/pg_hba.conf`); no hace falta tocar nada. PostgreSQL escucha solo en `localhost`: déjalo así.
+PostgreSQL de Ubuntu acepta contraseña desde `127.0.0.1` (`scram-sha-256` en `/etc/postgresql/$PGV/main/pg_hba.conf`, `/etc/postgresql/15/main/pg_hba.conf` en el servidor de ATEXIS); no hace falta tocar nada. Si IT instaló la 15 con otra configuración, comprueba que ese fichero tiene la línea `host all all 127.0.0.1/32 scram-sha-256` (o `md5`). PostgreSQL escucha solo en `localhost`: déjalo así.
 
-**Si vas a traer datos** ([migracion-datos.md](migracion-datos.md)), crea la base igual, pero **no** ejecutes `alembic upgrade head` en el paso 4.5: la restauración trae el esquema.
+**Si vas a traer datos** ([migracion-datos.md](migracion-datos.md)), crea la base igual, pero **no** ejecutes `alembic upgrade head` en el paso 4.5: la restauración trae el esquema. Con la 15 (servidor de ATEXIS) y la base del portátil en la 16, la carga es la de su sección 7 (SQL de texto), no `pg_restore`.
 
 ---
 
@@ -115,7 +142,7 @@ sudo -u brdp .venv/bin/pip install --require-hashes -r requirements.lock.txt
 ```
 
 - `requirements.lock.txt` es el de producción: versiones exactas con sus hashes. No uses `requirements-dev.lock.txt` (lleva las herramientas de tests) ni `pip install -e`.
-- Con inspección SSL en la red, añade `--cert /etc/ssl/brdp/corporate-root.pem` (ver 4.4).
+- Solo si hay inspección SSL en la red (no en el servidor de ATEXIS): añade `--cert /etc/ssl/brdp/corporate-root.pem` (ver 4.4).
 
 ### 4.2 El fichero `backend/.env`
 
@@ -187,9 +214,9 @@ sudo -u brdp .venv/bin/python scripts/generate_rsa_keypair.py
 
 Escribe `keys/jwt_private.pem` (permisos 600) y `keys/jwt_public.pem`. Las claves no están en git y no se copian de otra instalación: se generan en cada servidor. El script se niega a sobrescribir unas claves que ya existen (cambiarlas cierra todas las sesiones).
 
-### 4.4 Solo con inspección SSL (Zscaler): el certificado corporativo
+### 4.4 Opcional, solo si hay inspección SSL (Zscaler): el certificado corporativo
 
-Si no hay inspección SSL en la red, salta este paso.
+Si el servidor llega a `api.mistral.ai` sin proxy ni inspección SSL (es el caso del servidor de ATEXIS), **salta este paso** y deja comentada la línea `SSL_CERT_FILE` del paso 4.6. Para comprobarlo: `curl -sS -o /dev/null -w "%{http_code}\n" https://api.mistral.ai/v1/models` da `401` (llega, sin clave) y no un error de certificado.
 
 Copia el certificado raíz corporativo (`.pem`, te lo da Seguridad/IT) y crea un fichero con los certificados públicos de Python más el corporativo:
 
@@ -233,7 +260,7 @@ WorkingDirectory=/opt/brdp/app/backend
 ExecStart=/opt/brdp/app/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
 Restart=on-failure
 RestartSec=5
-# Solo con inspección SSL (paso 4.4). Es una variable del proceso, no de .env.
+# Opcional: solo si hay inspección SSL (paso 4.4). Es una variable del proceso, no de .env.
 #Environment=SSL_CERT_FILE=/etc/ssl/brdp/ca-bundle.pem
 
 [Install]
@@ -267,7 +294,7 @@ sudo cp -r /opt/brdp/app/dist/. /var/www/brdp/
 ```
 
 - `npm ci` instala exactamente `package-lock.json` (también las herramientas de compilación, que hacen falta para `npm run build`). Nunca `npm audit fix --force`.
-- Con inspección SSL, `npm ci` falla con `SELF_SIGNED_CERT_IN_CHAIN`: lánzalo con el certificado corporativo, por ejemplo `sudo -u brdp env NODE_EXTRA_CA_CERTS=/etc/ssl/brdp/corporate-root.pem npm ci` (si hay un proxy HTTP, añade también `HTTPS_PROXY=…` dentro del `env`).
+- Solo si hay inspección SSL: `npm ci` falla con `SELF_SIGNED_CERT_IN_CHAIN`; lánzalo con el certificado corporativo, por ejemplo `sudo -u brdp env NODE_EXTRA_CA_CERTS=/etc/ssl/brdp/corporate-root.pem npm ci` (si hay un proxy HTTP, añade también `HTTPS_PROXY=…` dentro del `env`).
 - El frontend llama a `/api` en el mismo nombre de servidor: no hay que configurarle nada.
 
 ---
@@ -435,7 +462,7 @@ Añade:
 30 2 * * * pg_dump -d brdp_manager -Fc -f /var/backups/brdp/brdp_$(date +\%F).dump && find /var/backups/brdp -name 'brdp_*.dump' -mtime +14 -delete
 ```
 
-(El `\%` es obligatorio dentro de cron.) Guarda 14 días.
+(El `\%` es obligatorio dentro de cron.) Guarda 14 días. `pg_dump` es el de la versión del servidor (`/usr/bin/pg_dump` elige el de `/usr/lib/postgresql/$PGV/bin/`).
 
 Guarda también, **fuera del servidor y en un sitio seguro**: `backend/.env` y `backend/keys/`. No están en git. Las copias de la base contienen usuarios (contraseñas cifradas) y datos de cliente: trátalas como confidenciales.
 
@@ -477,9 +504,11 @@ curl -s http://127.0.0.1:8000/health
 | El backend no arranca: no encuentra `keys/jwt_private.pem` | Falta el paso 4.3, o `WorkingDirectory` no es `/opt/brdp/app/backend` |
 | El backend no arranca: error de conexión o de contraseña con PostgreSQL | `DATABASE_URL` en `.env` (usuario, contraseña, `postgresql+asyncpg://`) |
 | «Faltan las tablas… migración no aplicada» o `/health` con `up_to_date: false` | `alembic upgrade head` (paso 4.5) |
-| `extension "vector" is not available` | Falta pgvector (paso 2.1) |
+| `extension "vector" is not available` | Falta pgvector de la versión del servidor (paso 2.1: `postgresql-15-pgvector` con la 15) |
+| `pg_lsclusters` muestra dos versiones (15 y 16) | Se instaló la 16 al lado de la 15. Usa la que ya estaba (paso 1) y quita la otra con IT: `sudo apt remove postgresql-16 postgresql-16-pgvector` (borra sus binarios, no los datos de la 15) |
+| `pg_restore: error: unsupported version (…) in file header` al traer datos | El servidor tiene un PostgreSQL más viejo que el portátil: [migracion-datos.md](migracion-datos.md), sección 7 |
 | `permission denied to create extension "vector"` | La extensión la tiene que crear `postgres` (paso 2.2) |
-| La IA falla con `SSLCertVerificationError` en el log | Inspección SSL: falta `Environment=SSL_CERT_FILE=…` en el servicio (paso 4.4). En `.env` no sirve |
+| La IA falla con `SSLCertVerificationError` en el log | Solo con inspección SSL: falta `Environment=SSL_CERT_FILE=…` en el servicio (paso 4.4). En `.env` no sirve |
 | `npm ci` falla con `SELF_SIGNED_CERT_IN_CHAIN` | Inspección SSL: `NODE_EXTRA_CA_CERTS` (paso 5) |
 | La IA corta a los 60 s | Falta `proxy_read_timeout 330s` en nginx |
 | Subir un Excel o un BREX da `413` | Falta `client_max_body_size 25m` en nginx |

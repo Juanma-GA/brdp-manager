@@ -25,7 +25,7 @@ Las guías no lo resuelven: solo lo avisan. Ninguno de esos ficheros hace falta 
 Estado de las guías:
 
 - **Ubuntu 24.04**: ejecutada de principio a fin en un servidor limpio (paquetes, base de datos, backend, frontend, nginx con HTTPS, login en un navegador real, llamada al LLM, copia de seguridad).
-- **Migración de datos**: volcado, restauración en una base nueva, recuentos y arranque de la app ejecutados en Linux. El volcado desde Docker en Windows está revisado, no ejecutado.
+- **Migración de datos**: volcado, restauración en una base nueva, recuentos y arranque de la app ejecutados en Linux. El volcado desde Docker en Windows está revisado, no ejecutado. El paso de la 16 a la 15 (SQL de texto, el del servidor de ATEXIS) lo probó Juanma contra un PostgreSQL 15 con pgvector en Docker: recuentos idénticos.
 - **RHEL y Windows Server**: revisadas contra el código, **no probadas en un servidor real**. Los pasos que dependen solo del sistema operativo llevan la marca «No probado en un servidor real».
 
 ## Cómo es la app en el servidor
@@ -46,7 +46,7 @@ Navegador ──HTTPS──▶ proxy (nginx o IIS) ──┬── /         →
 |---|---|---|
 | Python | 3.11 o 3.12 (3.13 también instala) | `backend/pyproject.toml` (`requires-python = ">=3.11"`); el lockfile `backend/requirements.lock.txt` está generado para 3.11 en modo universal. Probado: instala con hashes en 3.11, 3.12 y 3.13 |
 | Node.js | 22 LTS (mínimo 20.19 o 22.12) | `vite` 8 y `@vitejs/plugin-react` 6 piden `^20.19.0 \|\| >=22.12.0` |
-| PostgreSQL | 16 recomendado (15 o más). **Igual o mayor** que la versión de la base que se migre | |
+| PostgreSQL | 15 o más (probado con 15 y 16). Si ya hay uno instalado, se usa ese con su pgvector: el servidor de ATEXIS tiene la 15.19 con `postgresql-15-pgvector` | Para traer los datos: con la misma versión que el portátil (16) o mayor, volcado `-Fc`; con una menor (la 15), volcado en SQL de texto ([migracion-datos.md](migracion-datos.md), sección 7) |
 | pgvector | la que traiga el paquete de tu PostgreSQL (probado con 0.6.0) | Obligatorio: la migración `0001` ejecuta `CREATE EXTENSION IF NOT EXISTS vector` |
 | Proxy con HTTPS | nginx (Linux) o IIS con URL Rewrite + ARR (Windows) | Ver abajo |
 | Certificado HTTPS | uno de la PKI interna vale | Ver abajo |
@@ -75,6 +75,8 @@ Ojo: en el propio servidor, por `http://localhost` o `http://127.0.0.1`, el nave
 | Rutas | `/api/` y `/health` al backend; el resto, ficheros de `dist/` con vuelta a `index.html` | La app es de una sola página (las rutas `/projects/...` no existen como ficheros) |
 
 ### Red corporativa con inspección SSL (Zscaler)
+
+Opcional: **solo si hay inspección SSL**. El servidor de ATEXIS llega directo a `api.mistral.ai`, sin proxy: no necesita nada de esta sección.
 
 Si la red inspecciona el tráfico HTTPS, el servidor necesita el certificado raíz corporativo en `.pem`:
 

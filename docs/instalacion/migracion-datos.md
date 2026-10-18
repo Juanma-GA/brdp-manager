@@ -4,7 +4,9 @@ Cómo pasar los datos de la instalación actual (PostgreSQL en Docker en un port
 
 Se copia la base entera con `pg_dump` y `pg_restore`.
 
-**Probado** en Linux (Ubuntu 24.04, PostgreSQL 16, pgvector 0.6.0) con una base de desarrollo con proyectos, BRDP, reglas, embeddings, historial, catálogos y registros: volcado, restauración en una base nueva, `alembic current`, recuentos por tabla idénticos, y el backend arrancado contra la base restaurada con login correcto. El volcado desde Docker en Windows (paso 2) está revisado, **no ejecutado**: los comandos de PowerShell son los mismos que se usan en Linux dentro del contenedor.
+> **Servidor de ATEXIS (Ubuntu 24.04.4, PostgreSQL 15.19 con `postgresql-15-pgvector`)**: la base del portátil es PostgreSQL 16, más nueva que la del servidor, y el `pg_restore` de la 15 no lee un volcado `-Fc` de la 16. Para ese servidor **no sigas los pasos 2.2 y 3.1**: usa el camino de la [sección 7](#7-servidor-con-una-versión-menor-de-postgresql-p-ej-16--15) (volcado en SQL de texto). El resto de la guía (1, 2.1, 3.2, 3.3, 4 y 5) vale igual; la copia al servidor está en la sección 7.1.
+
+**Probado** (camino `-Fc`, misma versión) en Linux (Ubuntu 24.04, PostgreSQL 16, pgvector 0.6.0) con una base de desarrollo con proyectos, BRDP, reglas, embeddings, historial, catálogos y registros: volcado, restauración en una base nueva, `alembic current`, recuentos por tabla idénticos, y el backend arrancado contra la base restaurada con login correcto. El volcado desde Docker en Windows (paso 2) está revisado, **no ejecutado**: los comandos de PowerShell son los mismos que se usan en Linux dentro del contenedor. El camino de la sección 7 (16 → 15) lo probó Juanma el 18/10 con su base real: volcado desde `brdp-postgres` (PostgreSQL 16.15) y carga en un PostgreSQL 15 con pgvector (imagen `pgvector/pgvector:pg15`), recuentos idénticos; en el servidor de ATEXIS, todavía no. Los comandos del servidor de esa sección (7.2 a 7.4: comprobaciones, carga como `brdp` con `ON_ERROR_STOP`, `ANALYZE`, recuentos) se ejecutaron también en Linux sobre una base nueva de la misma versión: carga sin errores, recuentos idénticos y todas las tablas de `brdp`.
 
 ---
 
@@ -58,6 +60,8 @@ Consecuencias:
    ```
 
 ### 2.2 Volcado
+
+**Solo si el PostgreSQL del servidor es de la misma versión que el del portátil o mayor** (paso 2.1.2). Si es menor —el servidor de ATEXIS tiene la 15 y el portátil la 16—, este volcado no se puede restaurar allí: haz el de la [sección 7](#7-servidor-con-una-versión-menor-de-postgresql-p-ej-16--15).
 
 **No uses `>` en PowerShell para el volcado.** En Windows PowerShell 5.1, `pg_dump … > fichero.dump` pasa la salida por texto y la escribe en UTF-16: el fichero queda estropeado y `pg_restore` dice `input file does not appear to be a valid archive`. El volcado se hace **dentro del contenedor**, con `-f`, y se saca con `docker cp`:
 
@@ -194,20 +198,113 @@ Después, en cada proyecto, «Compute embeddings» (las BRDP *Validated* y el ca
 |---|---|
 | PostgreSQL del servidor **igual** que el de origen | Lo normal: como arriba |
 | PostgreSQL del servidor **mayor** (p. ej. origen 16, servidor 17) | Funciona tal cual: `pg_restore` lee volcados de versiones anteriores. Usa el `pg_restore` del servidor (el de su versión) y, después, ejecuta en la base restaurada `ANALYZE;` para que PostgreSQL recalcule sus estadísticas |
-| PostgreSQL del servidor **menor** (p. ej. origen 16, servidor 15) | **No soportado.** Un `pg_restore` más viejo no lee el volcado (`unsupported version … in file header`) y PostgreSQL no garantiza que un volcado cargue en una versión anterior. Instala en el servidor la misma versión o una mayor (repositorio PGDG en Linux, instalador de EDB en Windows) |
+| PostgreSQL del servidor **menor** (p. ej. origen 16, servidor 15) | **Con volcado en SQL de texto ([sección 7](#7-servidor-con-una-versión-menor-de-postgresql-p-ej-16--15)), probado de 16 a 15.** Es el caso del servidor de ATEXIS. El volcado `-Fc` no sirve: el `pg_restore` más viejo no lo lee (`unsupported version … in file header`). PostgreSQL no garantiza que un volcado cargue en una versión anterior: funciona porque el esquema de la app no usa nada exclusivo de la 16 (las migraciones solo usan tablas, índices normales y el tipo `vector`). Si una migración futura usa algo de la versión mayor, la carga se parará en esa línea (ver la sección 7.4) |
 | pgvector distinto | La app solo usa el tipo `vector(1024)` (sin índices de vectores), que es igual en todas las versiones desde la 0.5. Funciona. Después de restaurar, si el servidor tiene una versión más nueva que la creada en la base: `ALTER EXTENSION vector UPDATE;` (como `postgres`) |
 | pgvector ausente en el servidor | La restauración falla en la primera tabla con una columna `vector`: instala pgvector (paso 2.1 de la guía) y crea la extensión antes de restaurar |
 
-Versiones conocidas: el contenedor de desarrollo usa la imagen `pgvector/pgvector` (PostgreSQL 16); compruébalo con el paso 2.1.2.
+Versiones conocidas: el contenedor de desarrollo usa la imagen `pgvector/pgvector` (PostgreSQL 16.15 en el portátil de Juanma); compruébalo con el paso 2.1.2. El servidor de ATEXIS: PostgreSQL 15.19 → sección 7.
 
 ---
 
-## 7. Si algo sale mal
+## 7. Servidor con una versión menor de PostgreSQL (p. ej. 16 → 15)
+
+**Es el camino del servidor real de ATEXIS**: Ubuntu 24.04.4 LTS con PostgreSQL 15.19 ya instalado y `postgresql-15-pgvector` de su `apt` (instalación: [linux-ubuntu.md](linux-ubuntu.md), «Si PostgreSQL ya está instalado»). El portátil tiene PostgreSQL 16.15.
+
+En lugar del volcado `-Fc` (paso 2.2) y de `pg_restore` (paso 3.1) se hace un volcado en **SQL de texto** y se carga con `psql`. Lo demás es igual: comprobaciones del paso 2.1 antes, `alembic current` (3.2), arranque (3.3) y comprobaciones (4) después.
+
+> **El `.sql` (unos 160 MB) contiene todos los usuarios (contraseñas cifradas) y los datos de cliente.** Se copia al servidor solo con `scp`, no se deja en carpetas compartidas ni se manda por correo, y se borra de los dos sitios al terminar (7.5).
+
+### 7.1 En el portátil: volcado en SQL de texto (PowerShell)
+
+Con el backend del portátil parado (paso 2.1.1) y los tres valores y los recuentos del paso 2.1 anotados:
+
+```powershell
+docker exec brdp-postgres sh -c "pg_dump -U brdp -d brdp_manager -Fp --no-owner --no-acl | grep -v -E '^(CREATE|COMMENT ON) EXTENSION' > /tmp/brdp_manager.sql"
+docker cp brdp-postgres:/tmp/brdp_manager.sql .\brdp_manager.sql
+docker exec brdp-postgres rm /tmp/brdp_manager.sql
+Get-FileHash .\brdp_manager.sql -Algorithm SHA256
+```
+
+- `-Fp` es SQL de texto: lo carga `psql`, sin la cabecera de versión por la que el `pg_restore` de la 15 rechaza un `-Fc` de la 16. Que las sentencias valgan en la 15 depende del esquema (sección 6).
+- `grep -v` quita las líneas `CREATE EXTENSION` y `COMMENT ON EXTENSION` del volcado: la extensión `vector` ya la crea `postgres` en el servidor (7.2), y `brdp` no puede crearla ni comentarla.
+- El `>` de esa línea está **dentro de las comillas**: lo ejecuta el `sh` del contenedor, no PowerShell. **Nunca** `docker exec … pg_dump … > fichero` ni `pg_dump … > fichero` en PowerShell: Windows PowerShell 5.1 escribe la salida en UTF-16 y el fichero queda estropeado (como en el paso 2.2).
+- Anota la huella SHA-256.
+
+Copia al servidor:
+
+```powershell
+scp .\brdp_manager.sql <usuario>@brdp.example.local:/tmp/brdp_manager.sql
+```
+
+### 7.2 En el servidor: base vacía, con la extensión y sin Alembic
+
+La base tiene que estar como la deja el paso 2.2 de [linux-ubuntu.md](linux-ubuntu.md): dueño `brdp`, extensión `vector` creada por `postgres`, y **sin** haber ejecutado `alembic upgrade head` (paso 4.5) ni `create_admin_user.py` (paso 7). Compruébalo:
+
+```bash
+sha256sum /tmp/brdp_manager.sql                     # la misma huella que en el portátil
+sudo -u postgres psql -d brdp_manager -Atc "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'brdp_manager'"   # brdp
+sudo -u postgres psql -d brdp_manager -Atc "SELECT extversion FROM pg_extension WHERE extname = 'vector'"                      # una versión (0.6.0 o parecida)
+sudo -u postgres psql -d brdp_manager -Atc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"                         # 0
+```
+
+Si la última da más de 0 (alguien ejecutó `alembic upgrade head` o una carga anterior), rehaz la base como en 7.4.
+
+### 7.3 Cargar el volcado
+
+Con el servicio del backend parado (`sudo systemctl stop brdp-backend`, si ya existe), como usuario `brdp` (pide la contraseña de la base, `<CONTRASEÑA_BD>`):
+
+```bash
+psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U brdp -d brdp_manager -f /tmp/brdp_manager.sql
+echo $?      # 0 = sin errores
+sudo -u postgres psql -d brdp_manager -c "ANALYZE;"
+```
+
+Durante la carga solo sale una tablita `set_config` (la primera línea del volcado): es normal. Cualquier `ERROR` para la carga (7.4).
+
+- Se carga conectando como `brdp`: todo lo que se crea es suyo, igual que con `--role=brdp` en el camino `-Fc`.
+- `-h 127.0.0.1`: `brdp` no es un usuario del sistema, así que entra con contraseña (no por el socket local).
+- `ON_ERROR_STOP=1` para en el **primer** error: sin él, `psql` seguiría y dejaría una base a medias que parece buena.
+- `ANALYZE;` recalcula las estadísticas de PostgreSQL (un volcado en texto no las trae). Como `postgres`: lanzado como `brdp` da avisos `permission denied to analyze "pg_authid"` (tablas del sistema), inofensivos.
+
+### 7.4 Si la carga se para
+
+`psql` dice la línea del `.sql` y el error (por ejemplo `psql:/tmp/brdp_manager.sql:1234: ERROR: …`). La base queda a medias: **no la arregles a mano**. Corrige la causa (la tabla de abajo, sección 8), borra la base, créala otra vez y repite 7.3:
+
+```bash
+sudo systemctl stop brdp-backend          # nadie conectado a la base
+sudo -u postgres psql -v ON_ERROR_STOP=1 <<'SQL'
+DROP DATABASE brdp_manager;
+CREATE DATABASE brdp_manager OWNER brdp;
+\c brdp_manager
+CREATE EXTENSION IF NOT EXISTS vector;
+SQL
+```
+
+Si el error nombra algo que la 15 no tiene (una función, una opción o un tipo de la 16), es que el esquema ya usa algo exclusivo de la versión mayor: este camino deja de valer y hay que instalar en el servidor la misma versión que el origen o una mayor.
+
+### 7.5 Comprobar y borrar
+
+1. `alembic current` (paso 3.2): el mismo número que en el portátil, con `(head)`.
+2. Los recuentos de la sección 4 tienen que ser **idénticos** a los del portátil. Referencia, la prueba de Juanma del 18/10 (16.15 → 15): migración `0031`; `brdps` 4723, 4686 con embedding; `brdp_catalog` 1106; `users` 8; `psql` terminó sin errores.
+3. Arranca como en el paso 3.3 y sigue las comprobaciones de la sección 4.
+4. Borra el volcado de los dos sitios:
+   ```bash
+   rm /tmp/brdp_manager.sql
+   ```
+   ```powershell
+   Remove-Item .\brdp_manager.sql
+   ```
+
+---
+
+## 8. Si algo sale mal
 
 | Síntoma | Causa y arreglo |
 |---|---|
+| `pg_restore: error: unsupported version (…) in file header` | El servidor tiene un PostgreSQL más viejo que el portátil (el de ATEXIS: 15 frente a 16). No sirve el volcado `-Fc`: sección 7 |
 | `pg_restore: error: input file does not appear to be a valid archive` | El volcado se hizo con `>` en PowerShell o se copió mal. Repite el paso 2.2 con `docker cp` y compara la huella |
 | `must be owner of extension vector` | Falta la lista `-L` que quita la extensión (paso 3.1a o 3.1b) |
+| `psql:…/brdp_manager.sql:NNN: ERROR: …` (camino de la sección 7) | La carga se paró en esa línea: borra la base, créala otra vez y repite (sección 7.4) |
 | `relation "…" already exists` | La base no estaba vacía (se ejecutó `alembic upgrade head` o una restauración anterior): bórrala, créala otra vez (paso 2.2 de la guía) y repite |
 | `extension "vector" is not available` / `type "vector" does not exist` | Falta pgvector o la extensión en la base nueva (paso 2 de la guía) |
 | `permission denied for table …` al usar la app | Se restauró sin `--role=brdp` (Linux) o como `postgres` (Windows): repite la restauración sobre una base vacía |
